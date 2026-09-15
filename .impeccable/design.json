@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-12T00:00:00Z",
+  "title": "Design System: Money Manager",
+  "extensions": {
+    "platform": "android-compose-material3",
+    "note": "Values are read from Kotlin/Compose source (Theme.kt, Water.kt, Charts.kt, Components.kt, Nav.kt, screens/Common.kt). The build compiles but has never been rendered on a device; HTML/CSS in the components array is a web approximation for panel preview only and is not the shipped implementation.",
+    "colorMeta": {
+      "surf": { "role": "primary", "displayName": "Surf", "canonical": "#6FB4FA", "lightCounterpart": "#15558F", "tonalRamp": ["#04101D", "#071628", "#0D2540", "#113052", "#17406C", "#2E5C90", "#6FB4FA", "#DCEAF8"] },
+      "waterline": { "role": "primary", "displayName": "Waterline", "canonical": "#8FD8FF", "lightCounterpart": "#15558F", "tonalRamp": ["#05202E", "#0A3346", "#114A63", "#1A6382", "#2A83A6", "#4FA9C9", "#8FD8FF", "#DDF2FF"] },
+      "kelp": { "role": "secondary", "displayName": "Kelp", "canonical": "#43D39E", "lightCounterpart": "#0E7A55", "tonalRamp": ["#04221A", "#073527", "#0A4C38", "#0E7A55", "#16A273", "#2BBD8B", "#43D39E", "#C4F3E1"] },
+      "coral": { "role": "secondary", "displayName": "Coral", "canonical": "#FF7A6B", "lightCounterpart": "#A33227", "tonalRamp": ["#2C0806", "#460F0B", "#661813", "#A33227", "#D1493A", "#F06253", "#FF7A6B", "#FFDAD4"] },
+      "sun": { "role": "tertiary", "displayName": "Sun", "canonical": "#F6C566", "lightCounterpart": "#8A6300", "tonalRamp": ["#2C1F00", "#3E2C00", "#5A4300", "#8A6300", "#B58400", "#D9A72F", "#F6C566", "#FFE3A6"] },
+      "spray": { "role": "neutral", "displayName": "Spray", "canonical": "#DCEAF8", "tonalRamp": ["#04101D", "#071628", "#0D2540", "#17406C", "#41617F", "#A9C4E0", "#DCEAF8", "#EFF5FB"] },
+      "expense-ink": { "role": "neutral", "displayName": "Expense Ink", "canonical": "#C6DCF2", "lightCounterpart": "#1F4463", "tonalRamp": ["#071628", "#0D2540", "#113052", "#1F4463", "#3D6489", "#8FC0E8", "#C6DCF2", "#EFF5FB"] },
+      "shelf": { "role": "neutral", "displayName": "Shelf (depth 0)", "canonical": "#17406C", "lightCounterpart": "#FFFFFF", "tonalRamp": ["#04101D", "#071628", "#0D2540", "#113052", "#17406C", "#1A3C60", "#2E5C90", "#CFE5FF"] },
+      "abyss": { "role": "neutral", "displayName": "Abyss (depth 4)", "canonical": "#04101D", "lightCounterpart": "#9FBBD8", "tonalRamp": ["#04101D", "#071628", "#091E33", "#0D2540", "#113052", "#17406C", "#2E5C90", "#6FB4FA"] },
+      "glass": { "role": "neutral", "displayName": "Glass Film", "canonical": "#2E4E9BE8", "lightCounterpart": "#9EFFFFFF", "tonalRamp": ["#0D2540", "#113052", "#17406C", "#1D3C60", "#2E5C90", "#4E9BE8", "#8FC0E8", "#DCEAF8"] },
+      "glass-edge": { "role": "neutral", "displayName": "Specular Edge", "canonical": "#3DBFE0FF", "lightCounterpart": "#80FFFFFF", "tonalRamp": ["#0A2A46", "#15558F", "#2E86D8", "#5AA9F0", "#8FD8FF", "#BFE0FF", "#DCEAF8", "#FFFFFF"] }
+    },
+    "typographyMeta": {
+      "money-hero": { "displayName": "Money Hero", "purpose": "Safe-to-spend over the water surface on Home. At most one per screen." },
+      "money-large": { "displayName": "Money Large", "purpose": "A screen's headline figure inside a plate." },
+      "money-medium": { "displayName": "Money Medium", "purpose": "The default Stat value." },
+      "money-row": { "displayName": "Money Row", "purpose": "Every ledger amount; the tabular column that aligns on the decimal." },
+      "money-small": { "displayName": "Money Small", "purpose": "Dense secondary figures." },
+      "headline-small": { "displayName": "Section Title", "purpose": "SectionHeading title. No eyebrow above it." },
+      "label-medium": { "displayName": "Caption Label", "purpose": "Captions above figures, and flag text." }
+    },
+    "shadows": [
+      { "name": "none", "value": "none", "purpose": "The system ships no shadows. Elevation is a depth argument that picks a bed tint and alpha." },
+      { "name": "specular-edge", "value": "1.2dp stroke, horizontal gradient transparent -> #3DBFE0FF -> transparent, across a 22dp top-corner arc", "purpose": "The only stroke on a plate. Top edge only; loses 25% alpha per depth step." }
+    ],
+    "depthLadder": [
+      { "depth": 0, "bed": "surfaceContainerHigh @ 62%", "film": "glass @ 100% of token alpha", "purpose": "At the surface. The default plate." },
+      { "depth": 1, "bed": "surfaceContainer @ 70%", "film": "glass @ 82%", "purpose": "Under the page's emphasis: empty states, secondary blocks." },
+      { "depth": 2, "bed": "surfaceContainerLow @ 78%", "film": "glass @ 64%", "purpose": "A plate nested inside another plate." },
+      { "depth": 3, "bed": "surfaceContainerLowest @ 86%", "film": "glass @ 46%", "purpose": "The floor. Also the bed of every gauge, vessel and water column." }
+    ],
+    "motion": [
+      { "name": "water-level", "value": "tween 1100ms FastOutSlowInEasing", "purpose": "The one authored motion: the Home water column's level rise." },
+      { "name": "swell", "value": "infiniteRepeatable tween 6400ms LinearEasing, Restart", "purpose": "Two summed sine waves on the water surface. Home hero only." },
+      { "name": "caustic-drift", "value": "infiniteRepeatable tween 24000ms LinearEasing, Restart", "purpose": "The ground's three scatters. Runs only on Home and Lock." },
+      { "name": "bar-fill", "value": "tween 720ms FastOutSlowInEasing", "purpose": "WaterBar fill settle." },
+      { "name": "chart-reveal", "value": "tween 820-900ms FastOutSlowInEasing", "purpose": "Ring sweep, vessel fill, sounding-line reveal." },
+      { "name": "tab-fade", "value": "fadeIn 190ms / fadeOut 150ms", "purpose": "Tab-to-tab navigation." },
+      { "name": "detail-push", "value": "slideInHorizontally 280ms at width/5 + fadeIn 200ms; pop slideOut 260ms + fadeOut 160ms", "purpose": "Into and out of a detail screen." },
+      { "name": "motion-gate", "value": "ValueAnimator.areAnimatorsEnabled()", "purpose": "Every animated surface reads this first and collapses to a zero-duration tween when off." }
+    ],
+    "breakpoints": [
+      { "name": "compact", "value": "<640dp", "purpose": "Bottom navigation bar, five equal destinations." },
+      { "name": "expanded", "value": ">=640dp", "purpose": "Navigation rail on the leading edge." }
+    ],
+    "categoryScale": {
+      "dark": ["#8FD8FF", "#5AA9F0", "#3D7FD0", "#43D39E", "#E086C8", "#7C6FE8", "#7FC4C9", "#2E5C90"],
+      "light": ["#1E6FB8", "#15558F", "#0B3A66", "#0E7A55", "#A63A86", "#4B3FB0", "#2C7F87", "#4A80B5"],
+      "note": "Eight steps, no warm hue. #F6C566 is excluded on purpose."
+    }
+  },
+  "components": [
+    {
+      "name": "Plate (depth 0)",
+      "kind": "card",
+      "refersTo": "plate-surface",
+      "description": "The default container for anything that is not the hero: a translucent glass plate lit along its top edge.",
+      "html": "<div class=\"ds-plate\"><div class=\"ds-plate-title\">This month</div><div class=\"ds-plate-body\">Every dollar has a job.</div></div>",
+      "css": ".ds-plate { position: relative; border-radius: 28px; padding: 18px; background: linear-gradient(#17406CE0, #17406CE0), #2E4E9BE8; color: #DCEAF8; font-family: Roboto, system-ui, sans-serif; overflow: hidden; } .ds-plate::before { content: \"\"; position: absolute; inset: 0 0 auto 0; height: 28px; border-radius: 28px 28px 0 0; border-top: 1.2px solid transparent; background: linear-gradient(90deg, transparent, #BFE0FF66 30%, #BFE0FF66 70%, transparent) top/100% 1.2px no-repeat; } .ds-plate-title { font-size: 19px; font-weight: 600; letter-spacing: -0.012em; } .ds-plate-body { margin-top: 6px; font-size: 14px; line-height: 20px; color: #A9C4E0; }"
+    },
+    {
+      "name": "Plate (depth 2)",
+      "kind": "card",
+      "refersTo": "plate-sunk",
+      "description": "A plate nested inside another plate: denser bed, dimmer edge, same corner.",
+      "html": "<div class=\"ds-plate-sunk\"><div class=\"ds-plate-title\">Nested block</div></div>",
+      "css": ".ds-plate-sunk { position: relative; border-radius: 28px; padding: 18px; background: linear-gradient(#091E33C7, #091E33C7), #2E4E9B94; color: #DCEAF8; font-family: Roboto, system-ui, sans-serif; } .ds-plate-sunk::before { content: \"\"; position: absolute; inset: 0 0 auto 0; height: 1.2px; background: linear-gradient(90deg, transparent, #BFE0FF33 30%, #BFE0FF33 70%, transparent); } .ds-plate-sunk .ds-plate-title { font-size: 19px; font-weight: 600; letter-spacing: -0.012em; }"
+    },
+    {
+      "name": "Pill (emphasis)",
+      "kind": "button",
+      "refersTo": "pill-emphasis",
+      "description": "The filled action pill. The only button shape that sits directly on the water.",
+      "html": "<button class=\"ds-pill-emphasis\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z\"/></svg>Log a spend</button>",
+      "css": ".ds-pill-emphasis { display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 12px 16px; border: none; border-radius: 999px; background: #6FB4FA; color: #04223F; font-family: Roboto, system-ui, sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s, filter 0.15s; } .ds-pill-emphasis:hover { filter: brightness(1.08); } .ds-pill-emphasis:focus-visible { outline: 2px solid #8FD8FF; outline-offset: 2px; } .ds-pill-emphasis:active { filter: brightness(0.94); }"
+    },
+    {
+      "name": "Pill (glass)",
+      "kind": "button",
+      "refersTo": "pill",
+      "description": "The unemphasised action pill: the glass film with onSurface text.",
+      "html": "<button class=\"ds-pill\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M7 17h10v-2H7zm0-4h10v-2H7zm0-6v2h10V7z\"/></svg>Transfer</button>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 12px 16px; border: none; border-radius: 999px; background: #4E9BE82E; color: #DCEAF8; font-family: Roboto, system-ui, sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s; } .ds-pill:hover { background: #4E9BE850; } .ds-pill:focus-visible { outline: 2px solid #8FD8FF; outline-offset: 2px; }"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Tag and filter chip. Selection is a fill change, never an outline-colour-only change.",
+      "html": "<span class=\"ds-chip\">All accounts</span><span class=\"ds-chip ds-chip-selected\">This month</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 7px 14px; margin-right: 8px; border-radius: 999px; background: #091E33; color: #A9C4E0; font-family: Roboto, system-ui, sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s, color 0.15s; } .ds-chip:hover { background: #12304F; } .ds-chip:focus-visible { outline: 2px solid #8FD8FF; outline-offset: 2px; } .ds-chip-selected { background: #17406C; color: #CFE5FF; }"
+    },
+    {
+      "name": "Flag",
+      "kind": "chip",
+      "refersTo": "flag",
+      "description": "One glyph, one line, one tone, on a 15%-alpha wash of that tone. Streaks, warnings and states.",
+      "html": "<span class=\"ds-flag\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2s5 4.5 5 9a5 5 0 0 1-10 0c0-1.5.6-2.9 1.4-4C9 9.5 10 11 11 11c0-3 1-6 1-9z\"/></svg>12-day streak</span>",
+      "css": ".ds-flag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px; background: #F6C56626; color: #F6C566; font-family: Roboto, system-ui, sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 0.03em; }"
+    },
+    {
+      "name": "Ledger Row",
+      "kind": "custom",
+      "refersTo": "ledger-row",
+      "description": "One line of the ledger: circular marker, merchant, one quiet meta line, and a tabular amount holding the right edge with cents dimmed.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-marker\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M7 18a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 18zm10 0a2 2 0 1 0 .001 4.001A2 2 0 0 0 17 18zM7.2 14.8h9.4l2.6-8H5.6L5 4H2v2h2l2.6 8.8-1 1.8c-.5.9.1 2.4 1.4 2.4h11v-2H7.2z\"/></svg></span><span class=\"ds-row-text\"><span class=\"ds-row-title\">Corner Market</span><span class=\"ds-row-sub\">Groceries &middot; Everyday</span></span><span class=\"ds-row-amount\">$42<span class=\"ds-cents\">.18</span><span class=\"ds-row-time\">18:04</span></span></div>",
+      "css": ".ds-row { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 8px 0; font-family: Roboto, system-ui, sans-serif; color: #DCEAF8; } .ds-marker { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 50%; background: #8FD8FF29; color: #8FD8FF; flex: none; } .ds-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; } .ds-row-title { font-size: 16px; line-height: 23px; } .ds-row-sub { font-size: 12px; line-height: 17px; color: #A9C4E0; } .ds-row-amount { display: flex; flex-direction: column; align-items: flex-end; font-family: Archivo, system-ui, sans-serif; font-variation-settings: \"wdth\" 112; font-feature-settings: \"tnum\"; font-size: 16px; font-weight: 500; letter-spacing: -0.012em; color: #C6DCF2; } .ds-cents { font-size: 0.64em; opacity: 0.52; } .ds-row-time { font-family: Roboto, system-ui, sans-serif; font-size: 12px; font-weight: 400; letter-spacing: normal; color: #A9C4E0; } .ds-row:hover { background: #FFFFFF0A; }"
+    },
+    {
+      "name": "Nav Row",
+      "kind": "nav",
+      "refersTo": "nav-row",
+      "description": "A row that navigates somewhere: 38dp marker, title, optional subtitle, one chevron. Never a whole card per link.",
+      "html": "<a class=\"ds-navrow\" href=\"#\"><span class=\"ds-marker ds-marker-sm\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M5 6h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zm12 6a1.5 1.5 0 1 0 .001 3.001A1.5 1.5 0 0 0 17 12z\"/></svg></span><span class=\"ds-row-text\"><span class=\"ds-row-title\">Accounts</span><span class=\"ds-row-sub\">4 open</span></span><svg class=\"ds-chevron\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M9.3 6.7 14.6 12l-5.3 5.3 1.4 1.4L17.4 12l-6.7-6.7z\"/></svg></a>",
+      "css": ".ds-navrow { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 8px 0; text-decoration: none; color: #DCEAF8; font-family: Roboto, system-ui, sans-serif; } .ds-navrow .ds-marker-sm { width: 38px; height: 38px; background: #6FB4FA29; color: #6FB4FA; } .ds-navrow .ds-row-title { font-size: 16px; line-height: 23px; } .ds-navrow .ds-row-sub { font-size: 12px; color: #A9C4E0; } .ds-chevron { color: #A9C4E0; flex: none; } .ds-navrow:hover { background: #FFFFFF0A; } .ds-navrow:focus-visible { outline: 2px solid #8FD8FF; outline-offset: 2px; }"
+    },
+    {
+      "name": "Water Column (hero)",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "The thesis surface: the fill height is the figure. Safe-to-spend at 54sp over the surface line, scrimmed so type holds contrast at any level. Preview is static; the shipped surface is a Compose Canvas with a two-wave swell.",
+      "html": "<div class=\"ds-column\"><div class=\"ds-column-fill\"></div><div class=\"ds-column-scrim\"></div><div class=\"ds-column-text\"><div class=\"ds-column-label\">Safe to spend</div><div class=\"ds-column-figure\">$1,284<span class=\"ds-cents\">.60</span></div><div class=\"ds-column-sub\">$71.36 a day for the 18 days left</div></div></div>",
+      "css": ".ds-column { position: relative; height: 320px; border-radius: 32px; overflow: hidden; background: #04101D; font-family: Roboto, system-ui, sans-serif; } .ds-column-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 62%; background: linear-gradient(#6FB4FAEB, #6FB4FA8C 45%, #6FB4FA4D); border-top: 2px solid #8FD8FF; } .ds-column-scrim { position: absolute; inset: 0; background: linear-gradient(#04101DB8, #04101D42 50%, transparent 85%); } .ds-column-text { position: relative; padding: 24px 20px; color: #DCEAF8; } .ds-column-label { font-size: 14px; font-weight: 500; color: #A9C4E0; } .ds-column-figure { margin-top: 4px; font-family: Archivo, system-ui, sans-serif; font-variation-settings: \"wdth\" 118; font-feature-settings: \"tnum\"; font-size: 54px; line-height: 58px; font-weight: 700; letter-spacing: -0.038em; } .ds-column-figure .ds-cents { font-size: 0.64em; opacity: 0.52; } .ds-column-sub { margin-top: 6px; font-size: 14px; color: #A9C4E0; }"
+    },
+    {
+      "name": "Water Bar",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "A budget envelope as a level in a tube, with a pace tick where the month's own clock has reached.",
+      "html": "<div class=\"ds-bar\"><div class=\"ds-bar-fill\"></div><div class=\"ds-bar-pace\"></div></div>",
+      "css": ".ds-bar { position: relative; height: 10px; border-radius: 999px; background: #04101D; overflow: hidden; } .ds-bar-fill { position: absolute; inset: 0 auto 0 0; width: 58%; border-radius: 999px; background: linear-gradient(90deg, #6FB4FA80, #6FB4FA); } .ds-bar-pace { position: absolute; top: 0; bottom: 0; left: 64%; width: 1.5px; background: #A9C4E0CC; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lit Column of Water",
+    "overview": "The screen is a column of water lit from above. Depth, not shadow, is the only elevation mechanism: a surface nearer the top of the stack is lighter and more translucent because it is nearer the light, and a surface buried under others is denser navy. Material 3's tonal elevation already works this way, so the metaphor rides the platform instead of fighting it.\n\nThe system's thesis is that the figure and the field are the same fact. Safe-to-spend is set at 54sp over a water surface whose fill height IS that figure; remaining days run down the right edge as a gauge of ticks. The app refuses the fintech dashboard header - balance plus a row of stat chips - and it refuses a card inset on four sides for the one thing the user opened the app to read. Plates transmit rather than refract: their beds are translucent so the ground's gradient and its slow caustics read through every card. There is no backdrop blur anywhere in the build, by decision - Compose at this version has no backdrop filter, and a fake blur would be the dishonest half of the material.\n\nDensity is calm and list-led. One warm hue exists in the whole product and it is rationed. Type is Archivo throughout, run wide for money and normal for prose, tabular wherever a figure stands for real currency. The build compiles but has never been rendered on a device; every value is read from source, and claims about appearance are deliberately absent.",
+    "keyCharacteristics": [
+      "Depth ladder from #17406C down to #04101D; elevation is tint and alpha, never a drop shadow.",
+      "Translucent plates lit by a 1.2dp specular hairline along the top edge only.",
+      "Archivo variable, wdth 112-118 for money, wdth 100 for text; tnum on every figure.",
+      "One warm hue (#F6C566 dark / #8A6300 light), reserved for goals and streaks.",
+      "One authored motion: the Home water column's rise and swell."
+    ],
+    "rules": [
+      { "name": "The One Warm Hue Rule", "body": "#F6C566 (dark) / #8A6300 (light) means goals and streaks and nothing else. It is excluded from categoryScale() on purpose, so a warm mark anywhere in the app means exactly one thing.", "section": "colors" },
+      { "name": "The Expenses Are Not Red Rule", "body": "Expense amounts take Expense Ink. Only over-budget and overdue reach for alert. In a tracker you log expenses all day; painting each one as an alarm makes the alarm meaningless.", "section": "colors" },
+      { "name": "The Never-Colour-Alone Rule", "body": "Colour never carries the direction of money by itself. Every amount has a sign and sits in a tabular column, and every over state pairs its tone with a written label - so a screen reader and a colour-blind eye get the same fact.", "section": "colors" },
+      { "name": "The Real Money Rule", "body": "Any figure standing for real currency is set in a MoneyType style - Archivo wide, tabular, never italic - and rendered through MoneyText. Counts, percentages and day numbers are not money and use the Material roles.", "section": "typography" },
+      { "name": "The Cents Are Shown Rule", "body": "Money is Long minor units formatted by moneyParts. Cents are always present and never emphasised: 64% of the base size at 52% alpha. Never Double, never rounded away.", "section": "typography" },
+      { "name": "The No Eyebrow Rule", "body": "A section heading carries its own weight: a title, an optional caption beneath it, and an optional trailing text action. No kicker, no numbering, no all-caps label stacked above a heading.", "section": "typography" },
+      { "name": "The Elevation Is Depth Rule", "body": "A plate's bed alpha and tint are a function of its depth argument and nothing else. Never a drop shadow, never a hand-picked alpha, never a border to fake a lift.", "section": "elevation" },
+      { "name": "The Transmission Rule", "body": "Every plate lets the ground read through it. The gradient and its caustics are drawn once, behind everything; a plate that paints itself opaque buries the only reason the ground exists.", "section": "elevation" },
+      { "name": "The One Authored Motion Rule", "body": "The Home water column's level rise (1100ms FastOutSlowInEasing) plus its 6.4s swell is the app's one authored gesture. Everything else is Material's standard grammar. Every animated surface reads motionEnabled() first and collapses to a zero-duration tween when the system's Remove animations setting is on.", "section": "components" },
+      { "name": "The Real FAB Rule", "body": "One floating action per screen, and only where the primary action exists. A FAB that does nothing is worse than no FAB.", "section": "components" }
+    ],
+    "dos": [
+      "Do express elevation through Plate(depth = n) / Modifier.glassPlate(shape, depth) and let the depth argument pick the bed and the edge.",
+      "Do render every currency figure through MoneyText with a MoneyType style, so it is tabular, wide, and shows cents at 64% size / 52% alpha.",
+      "Do keep money as Long minor units and format it through moneyParts.",
+      "Do reserve {colors.sun} for goals and streaks.",
+      "Do pair every over or behind-pace tone with a sign, a label, or a written sentence.",
+      "Do call motionEnabled() before any animation, and draw the ground once per shell with animate scoped to the screen that owns the hero.",
+      "Do keep the 20dp gutter, and use Modifier.bleed() when - and only when - an item is the screen's thesis.",
+      "Do leave Dynamic Color off by default and opt-in in Appearance; a wallpaper-derived scheme reorders the depth ladder until the waterline stops meaning anything."
+    ],
+    "donts": [
+      "Don't add a drop shadow, an outline, or a hand-tuned alpha to fake elevation.",
+      "Don't paint an ordinary expense red.",
+      "Don't let colour be the only thing saying which way money went.",
+      "Don't put {colors.sun} into a chart scale, a category tint, or a general accent.",
+      "Don't widen ArchivoWide onto prose, or set money in the text width.",
+      "Don't round money into a Double or drop the cents.",
+      "Don't author a second hero motion, or animate the background on a screen with no hero.",
+      "Don't put a circular add button inside the navigation bar, or ship a FAB on a screen whose add-flow does not exist.",
+      "Don't stack a kicker or eyebrow above a section heading.",
+      "Don't pull in a chart library; the charts are drawn so they belong to this water."
+    ]
+  }
+}

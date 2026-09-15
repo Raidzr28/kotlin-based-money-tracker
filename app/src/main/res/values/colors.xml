@@ -1,0 +1,5 @@
+<resources>
+    <!-- Daylight on the surface. Matches LightScheme.background in Theme.kt. -->
+    <color name="window_background">#EFF5FB</color>
+    <color name="launcher_background">#071628</color>
+</resources>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The mark: three strata of a falling level, and the line it must not cross.
+  Same idea the Home hero draws at full size.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M31.5,33.5h49a4.5,4.5 0,0 1,0 9h-49a4.5,4.5 0,0 1,0 -9z"
+        android:fillColor="#8CC6FF" />
+    <path
+        android:pathData="M31.5,48.5h33a4.5,4.5 0,0 1,0 9h-33a4.5,4.5 0,0 1,0 -9z"
+        android:fillColor="#4E97E0" />
+    <path
+        android:pathData="M31.5,63.5h17a4.5,4.5 0,0 1,0 9h-17a4.5,4.5 0,0 1,0 -9z"
+        android:fillColor="#2C6BAE" />
+    <path
+        android:pathData="M24,79h60v3h-60z"
+        android:fillColor="#8FD8FF" />
+</vector>

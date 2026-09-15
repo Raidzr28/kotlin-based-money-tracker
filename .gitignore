@@ -1,0 +1,55 @@
+# --- Machine-local, never shared ---------------------------------------------------------------
+# Contains an absolute SDK path with your Windows username in it.
+local.properties
+
+# Per-machine tool settings.
+.claude/settings.local.json
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Build output ------------------------------------------------------------------------------
+.gradle/
+build/
+captures/
+.kotlin/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.ap_
+*.dex
+local.log
+
+# --- Signing. Nothing here yet; this is so it stays that way ------------------------------------
+# A release keystore signs every future update of this app. If it leaks, someone else can publish
+# an update to your users. Keep it outside the repo entirely and pass it in from CI secrets or a
+# gradle.properties in your home directory.
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Firebase / Google services config, for when sync lands. Holds project identifiers and API keys.
+google-services.json
+GoogleService-Info.plist
+
+# --- Reference material that is not ours to publish ---------------------------------------------
+# Collected screenshots of other people's finance-app design work, used as private reference while
+# building. They are somebody else's copyrighted output; a public repo would be republishing them.
+# The design decisions they informed are written up in DESIGN.md, which is ours and is committed.
+UI sample/
+
+# The design handoff archive: keep it local unless you have decided to publish its contents.
+*.zip
+
+# --- Deliberately NOT ignored -------------------------------------------------------------------
+# app/schemas/        Room's exported schema. Committing it is what lets the next version write a
+#                     real migration instead of guessing at the previous shape, and it is what
+#                     stops a schema change from silently destroying someone's ledger.
+# gradle/wrapper/     Including gradle-wrapper.jar. A wrapper without its jar cannot bootstrap,
+#                     which is the usual reason a cloned Android project will not build.
+# gradlew, gradlew.bat
+# .impeccable/        Design system record and asset provenance. Small, and it documents where
+#                     every shipped image came from.

@@ -1,0 +1,5 @@
+<resources>
+    <!-- Ten metres down. Matches DarkScheme.background in Theme.kt. -->
+    <color name="window_background">#071628</color>
+    <color name="launcher_background">#071628</color>
+</resources>
