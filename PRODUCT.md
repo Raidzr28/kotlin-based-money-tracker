@@ -10,19 +10,26 @@ android
 
 Kotlin + Jetpack Compose (Material 3), confirmed by the user via the README's suggested stack.
 
-What the scaffold actually depends on today: Compose BOM, Material 3, Material Icons Extended,
-Navigation Compose, Activity Compose, Lifecycle. Nothing else. Charts are drawn on `Canvas`
-rather than pulled from Vico or MPAndroidChart, because the design calls for a ring with labels
-on the arc and a mirrored net-worth sounding that neither library draws, and because a chart
-library brings its own house style into a committed visual world.
+What the app depends on: Compose BOM, Material 3, Material Icons Extended, Navigation Compose,
+Activity Compose, Lifecycle, Room (with KSP), WorkManager, AndroidX Biometric, and ML Kit text
+recognition. Charts are drawn on `Canvas` rather than pulled from Vico or MPAndroidChart, because
+the design calls for a ring with labels on the arc and a mirrored net-worth sounding that neither
+library draws, and because a chart library brings its own house style into a committed visual
+world. Exchange rates use `HttpURLConnection` and the framework's own JSON parser: one GET
+returning one small object does not need an HTTP library.
 
-Planned but deliberately not present yet, because this is a UI scaffold and each would only be
-boilerplate to rewrite once real data exists: Room, Hilt, WorkManager, the Google Drive backup
-path, and Firebase. The README remains the authority on where they land.
+Deliberately absent: **Hilt**. One database, one repository and one view model do not need a
+dependency-injection framework; `MoneyApp` is the whole graph in twenty lines, and swapping to
+Hilt later changes nothing above it.
 
-Toolchain note: Android SDK 35/36 is installed at `%LOCALAPPDATA%\Android\Sdk`, but the system
-JDK is 15, which AGP 8.7 rejects, and no AVD or system image is installed. Android Studio (which
-bundles its own JDK) is the expected build and run environment.
+Not started, and blocked rather than deferred: the **Gmail import, Google Drive backup and
+Firebase sync**. Each needs a Google Cloud or Firebase project owned by whoever ships the app,
+with OAuth clients bound to the release signing certificate. No useful code can be written until
+those exist, and none has been.
+
+Toolchain note: Android SDK 35/36 is installed, but the system JDK is 15, which AGP 8.7 rejects.
+Android Studio, which bundles its own JDK, is the expected build and run environment. No emulator
+or system image is installed, so nothing here has been verified against a rendered screen.
 
 ## Users
 
@@ -80,7 +87,14 @@ Hard constraints:
   whose core function is SMS handling; a finance app requesting it gets rejected.
 - Gamification is a layer over real data. Every badge, streak, and XP event maps to an
   actual transaction, budget, or goal action. No standalone gamification state that can
-  drift from the user's real finances.
+  drift from the user's real finances. Taken literally: challenges are computed on every
+  read and never stored, so there is no "joined" flag and no opt-in. The trade is that a
+  user cannot start a challenge deliberately; what they get instead is an app that cannot
+  claim a run their ledger does not support, and nothing to repair when an import or an
+  undo rewrites history underneath it.
+- Nothing is derived from a period the ledger was not keeping. A challenge stops counting
+  at the first transaction on record, so a fresh install is never handed a week of
+  discipline it did not earn.
 - Leaderboards are opt-in, off by default, and never expose raw balances.
 
 Terminology: "accounts" (also called wallets) hold money; transfers between them are

@@ -178,7 +178,16 @@ data class LedgerState(
         )
     }
 
-    val challenges: List<Challenge> get() = emptyList()
+    /**
+     * The pace a challenge is scored against: the month's budget spread evenly.
+     *
+     * Not [perDayMinor], which is what is left divided by the days remaining. That figure climbs
+     * every time you underspend, so yesterday would be judged against a bar that did not exist
+     * yesterday. An even pace is the same bar all month.
+     */
+    val evenPaceMinor = if (daysInMonth == 0) 0L else budgetedMinor / daysInMonth
+
+    val challenges: List<Challenge> get() = challengesFor(allTransactions, today, evenPaceMinor)
 }
 
 class MoneyRepository(private val db: MoneyDatabase) {
@@ -292,6 +301,11 @@ class MoneyRepository(private val db: MoneyDatabase) {
         note: String? = null,
         tags: List<String> = emptyList(),
         splits: List<Split> = emptyList(),
+        learn: Boolean = true,
+        /** What the user actually paid, when that was in another currency. */
+        originalMinor: Long? = null,
+        originalCurrency: String? = null,
+        rateMicros: Long? = null,
     ): String {
         val txnId = id ?: UUID.randomUUID().toString()
         val signed = when (flow) {
@@ -310,16 +324,103 @@ class MoneyRepository(private val db: MoneyDatabase) {
                 flow = flow.name,
                 note = note?.trim()?.ifEmpty { null },
                 currency = Accounts[accountId].currency,
+                originalMinor = originalMinor,
+                originalCurrency = originalCurrency,
+                // Stored with the row, not looked up later: a transaction is a record of what
+                // happened at a rate that applied then, and tomorrow's rate would rewrite history.
+                rateBasisPoints = rateMicros?.let { (it / 100).toInt() },
                 createdAtEpochSecond = System.currentTimeMillis() / 1000,
             ),
             splits = splits.map { SplitEntity(txnId = txnId, categoryId = it.categoryId, amountMinor = it.amountMinor) },
             tags = tags.map { TagEntity(txnId, it) },
         )
-        if (merchant.isNotBlank()) db.merchantMemory().remember(merchant.trim(), categoryId)
+        if (learn && merchant.isNotBlank()) db.merchantMemory().remember(merchant.trim(), categoryId)
         return txnId
     }
 
-    suspend fun deleteTransaction(id: String) = txnDao.deleteById(id)
+    /**
+     * Money between two of your own accounts.
+     *
+     * Written as two linked rows rather than one, because a single row cannot be true of both
+     * sides: the money genuinely left one account and genuinely arrived in another, and every
+     * balance in the app is the sum of that account's rows. Both are flagged Transfer, which is
+     * what keeps them out of income and expense totals while still moving the balances.
+     */
+    suspend fun transfer(
+        fromAccountId: String,
+        toAccountId: String,
+        amountMinor: Long,
+        date: LocalDate = today,
+        time: LocalTime = LocalTime.now(),
+        note: String? = null,
+    ) {
+        if (fromAccountId == toAccountId || amountMinor <= 0L) return
+        val amount = amountMinor.absoluteValue
+        val outId = UUID.randomUUID().toString()
+        val inId = UUID.randomUUID().toString()
+        val from = Accounts[fromAccountId]
+        val to = Accounts[toAccountId]
+        val stamp = System.currentTimeMillis() / 1000
+
+        fun row(id: String, pair: String, accountId: String, signed: Long, label: String) = TxnEntity(
+            id = id,
+            merchant = label,
+            categoryId = "savings",
+            accountId = accountId,
+            amountMinor = signed,
+            epochDay = date.toEpochDay(),
+            secondOfDay = time.toSecondOfDay(),
+            flow = Flow.Transfer.name,
+            note = note?.trim()?.ifEmpty { null },
+            currency = Accounts[accountId].currency,
+            transferPairId = pair,
+            createdAtEpochSecond = stamp,
+        )
+
+        txnDao.save(row(outId, inId, fromAccountId, -amount, "To ${to.name}"), emptyList(), emptyList())
+        txnDao.save(row(inId, outId, toAccountId, amount, "From ${from.name}"), emptyList(), emptyList())
+    }
+
+    /**
+     * Deleting one half of a transfer deletes the other. Leaving the twin behind would invent
+     * money in one account and destroy it in another.
+     */
+    /**
+     * Writes the rows the user ticked on the import screen.
+     *
+     * A merchant the user has categorised before keeps that category; everything else takes the
+     * fallback they chose. Importing deliberately does not teach the merchant memory, because the
+     * fallback is a bulk guess rather than a decision about this merchant -- letting it write back
+     * would turn one careless import into a wrong default forever.
+     */
+    suspend fun importStatement(
+        rows: List<StatementRow>,
+        accountId: String,
+        fallbackCategoryId: String,
+    ): Int {
+        rows.forEach { row ->
+            val learned = suggestCategory(row.description)
+            saveTransaction(
+                merchant = row.description,
+                categoryId = learned ?: fallbackCategoryId,
+                accountId = accountId,
+                amountMinor = row.amountMinor,
+                flow = if (row.amountMinor >= 0) Flow.In else Flow.Out,
+                date = row.date,
+                // A statement says which day, never which minute. Noon is a neutral stand-in
+                // rather than a pretence that the time is known.
+                time = LocalTime.NOON,
+                learn = false,
+            )
+        }
+        return rows.size
+    }
+
+    suspend fun deleteTransaction(id: String) {
+        val pair = txnDao.pairIdOf(id)
+        txnDao.deleteById(id)
+        if (pair != null) txnDao.deleteById(pair)
+    }
 
     suspend fun suggestCategory(merchant: String): String? =
         if (merchant.isBlank()) null else db.merchantMemory().categoryFor(merchant.trim())
@@ -361,6 +462,29 @@ class MoneyRepository(private val db: MoneyDatabase) {
         )
     )
 
+    /**
+     * Records a bill as paid: logs the money going out, then moves the bill to its next date.
+     *
+     * The next date is advanced repeatedly rather than once, because a bill three months overdue
+     * would otherwise land on a date that is still in the past and reappear as overdue the moment
+     * the user finished paying it.
+     */
+    suspend fun payBill(billId: String, on: LocalDate = today) {
+        val bill = db.bills().byId(billId) ?: return
+        saveTransaction(
+            merchant = bill.name,
+            categoryId = bill.categoryId ?: "home",
+            accountId = bill.accountId,
+            amountMinor = bill.amountMinor,
+            flow = Flow.Out,
+            date = on,
+        )
+        val next = nextDue(LocalDate.ofEpochDay(bill.dueEpochDay), Recurrence.of(bill.every), on)
+        db.bills().upsert(bill.copy(dueEpochDay = next.toEpochDay(), lastPaidEpochDay = on.toEpochDay()))
+    }
+
+    suspend fun deleteBill(id: String) = db.bills().deleteById(id)
+
     suspend fun upsertGoal(goal: Goal) = db.goals().upsert(
         GoalEntity(
             id = goal.id.ifEmpty { UUID.randomUUID().toString() },
@@ -372,6 +496,60 @@ class MoneyRepository(private val db: MoneyDatabase) {
             imagePath = goal.imagePath,
         )
     )
+
+    suspend fun upsertDebt(debt: Debt) = db.debts().upsert(
+        DebtEntity(
+            id = debt.id.ifEmpty { UUID.randomUUID().toString() },
+            name = debt.name,
+            balanceMinor = debt.balanceMinor,
+            aprBasisPoints = debt.aprBasisPoints,
+            minimumMinor = debt.minimumMinor,
+        )
+    )
+
+    suspend fun deleteGoal(id: String) = db.goals().deleteById(id)
+
+    suspend fun deleteDebt(id: String) = db.debts().deleteById(id)
+
+    /**
+     * Puts money into a savings goal.
+     *
+     * When the money comes from a different account this is a real transfer, because it is: the
+     * cash physically moves. When it is already sitting in the goal's own account nothing moves
+     * and this only earmarks it, so no transaction is invented to describe something that did not
+     * happen.
+     */
+    suspend fun contributeToGoal(goalId: String, fromAccountId: String, amountMinor: Long) {
+        if (amountMinor <= 0L) return
+        val goal = db.goals().byId(goalId) ?: return
+        if (fromAccountId.isNotEmpty() && fromAccountId != goal.accountId) {
+            transfer(fromAccountId, goal.accountId, amountMinor)
+        }
+        db.goals().upsert(goal.copy(savedMinor = goal.savedMinor + amountMinor))
+    }
+
+    /**
+     * Records a payment against a debt: the money leaves an account, and the balance owed drops.
+     *
+     * Filed under savings rather than an expense category, because clearing debt raises net worth
+     * instead of consuming it -- counting it as spending would make every month you pay down a
+     * loan look like a month you overspent.
+     */
+    suspend fun payDebt(debtId: String, fromAccountId: String, amountMinor: Long) {
+        if (amountMinor <= 0L) return
+        val debt = db.debts().byId(debtId) ?: return
+        saveTransaction(
+            merchant = debt.name,
+            categoryId = "savings",
+            accountId = fromAccountId,
+            amountMinor = amountMinor,
+            flow = Flow.Out,
+            learn = false,
+        )
+        db.debts().upsert(
+            debt.copy(balanceMinor = (debt.balanceMinor - amountMinor).coerceAtLeast(0L))
+        )
+    }
 
     suspend fun upsertCategory(category: Category) = db.categories().upsert(
         CategoryEntity(

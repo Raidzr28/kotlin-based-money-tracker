@@ -18,12 +18,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Subscriptions
 import androidx.compose.material.icons.rounded.SwapHoriz
-import androidx.compose.material.icons.rounded.TrendingUp
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.LedgerState
 import com.moneymanager.data.Accounts
@@ -158,7 +160,7 @@ fun HomeScreen(
                     )
                     if (behindPace) {
                         Flag(
-                            Icons.Rounded.TrendingUp,
+                            Icons.AutoMirrored.Rounded.TrendingUp,
                             "${(state.safeFraction * 100).toInt()}% of budget left, " +
                                 "${(monthPace * 100).toInt()}% of the month gone",
                             water.alert,
@@ -353,6 +355,7 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = scheme.onSurfaceVariant,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             MoneyText(
                                 account.balanceMinor,
@@ -427,7 +430,11 @@ private fun HeroPill(label: String, icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun BillRow(bill: Bill, modifier: Modifier = Modifier) {
+internal fun BillRow(
+    bill: Bill,
+    modifier: Modifier = Modifier,
+    onPay: (() -> Unit)? = null,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     val overdue = bill.due < today
@@ -447,12 +454,13 @@ internal fun BillRow(bill: Bill, modifier: Modifier = Modifier) {
             size = 38.dp,
         )
         Column(Modifier.weight(1f)) {
-            Text(bill.name, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface, maxLines = 1)
+            Text(bill.name, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 "${dueLabel(bill.due)} · ${bill.every.label.lowercase()}",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (overdue) water.alert else scheme.onSurfaceVariant,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         MoneyText(
@@ -460,5 +468,12 @@ internal fun BillRow(bill: Bill, modifier: Modifier = Modifier) {
             style = MoneyType.row,
             color = if (overdue) water.alert else toneFor(Flow.Out),
         )
+        if (onPay != null) {
+            Pill(
+                "Paid", Icons.Rounded.Check, onPay,
+                modifier = Modifier.padding(start = 10.dp),
+                container = MaterialTheme.colorScheme.surfaceContainerLow,
+            )
+        }
     }
 }

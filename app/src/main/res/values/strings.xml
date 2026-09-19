@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Money Manager</string>
+    <string name="widget_label">Money Manager</string>
+    <string name="widget_description">What is left to spend this month, spending so far today, and the next bill due.</string>
 </resources>

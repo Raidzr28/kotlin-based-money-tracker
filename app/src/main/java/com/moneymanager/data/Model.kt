@@ -83,8 +83,37 @@ data class Budget(
 enum class Recurrence(val label: String) {
     Monthly("Monthly"), Weekly("Weekly"), Yearly("Yearly"), Quarterly("Quarterly");
 
+    fun addTo(date: LocalDate, periods: Long): LocalDate = when (this) {
+        Monthly -> date.plusMonths(periods)
+        Weekly -> date.plusWeeks(periods)
+        Yearly -> date.plusYears(periods)
+        Quarterly -> date.plusMonths(periods * 3)
+    }
+
     companion object {
         fun of(name: String) = entries.firstOrNull { it.name == name } ?: Monthly
+    }
+}
+
+/**
+ * When a bill next falls due, once the current period has been paid.
+ *
+ * Two things this gets right that stepping the date forward one period at a time does not.
+ *
+ * It always moves at least one period. Paying rent three days early is still paying this month's
+ * rent, and a due date that stays put would leave the bill listed as owed and the reminder armed.
+ *
+ * It counts periods from the original due date rather than from the last date it landed on. A
+ * bill due on the 31st that goes unpaid through February would otherwise be pushed to the 28th
+ * and stay on the 28th forever, because 31 January plus one month is 28 February and 28 February
+ * plus one month is 28 March. Adding N months to the anchor gives 31 March.
+ */
+fun nextDue(due: LocalDate, every: Recurrence, paidOn: LocalDate): LocalDate {
+    var periods = 1L
+    while (true) {
+        val next = every.addTo(due, periods)
+        if (next.isAfter(paidOn)) return next
+        periods++
     }
 }
 

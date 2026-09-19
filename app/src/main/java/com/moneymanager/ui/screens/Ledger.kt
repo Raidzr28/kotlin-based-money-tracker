@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Backspace
+import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sell
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -49,8 +55,16 @@ import com.moneymanager.data.LedgerState
 import com.moneymanager.data.Accounts
 import com.moneymanager.data.Categories
 import com.moneymanager.data.Flow
+import com.moneymanager.data.ForeignAmount
+import com.moneymanager.data.RATE_SCALE
+import com.moneymanager.data.RatesStore
+import com.moneymanager.data.ReceiptGuess
+import com.moneymanager.data.SUPPORTED_CURRENCIES
+import com.moneymanager.data.convertMinor
 import com.moneymanager.data.dayLabel
+import com.moneymanager.data.Txn
 import com.moneymanager.data.money
+import com.moneymanager.data.thisMonth
 import com.moneymanager.data.symbolOf
 import com.moneymanager.ui.icon
 import com.moneymanager.ui.accountIcon
@@ -71,6 +85,8 @@ import com.moneymanager.ui.Routes
 import com.moneymanager.ui.SectionHeading
 import com.moneymanager.ui.toneFor
 import kotlin.math.absoluteValue
+import java.time.format.TextStyle as JavaTextStyle
+import java.util.Locale
 
 /* ------------------------------------------------------------------ Ledger */
 
@@ -83,6 +99,8 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
     val scheme = MaterialTheme.colorScheme
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(LedgerFilter.All) }
+    var taggedOnly by remember { mutableStateOf(false) }
+    val focus = LocalFocusManager.current
 
     val matching = state.transactions.filter { txn ->
         val hitsQuery = query.isBlank() ||
@@ -95,7 +113,7 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
             LedgerFilter.In -> txn.flow == Flow.In
             LedgerFilter.Transfers -> txn.flow == Flow.Transfer
         }
-        hitsQuery && hitsFilter
+        hitsQuery && hitsFilter && (!taggedOnly || txn.tags.isNotEmpty())
     }
     val days = matching.groupBy { it.date }.toList().sortedByDescending { it.first }
 
@@ -137,16 +155,28 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
                         value = query,
                         onValueChange = { query = it },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
                         textStyle = MaterialTheme.typography.bodyLarge.copy(color = scheme.onSurface),
                         cursorBrush = SolidColor(scheme.primary),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Icon(
-                    Icons.Rounded.FilterList,
-                    contentDescription = "More filters",
-                    tint = scheme.onSurfaceVariant,
-                )
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = ""; focus.clearFocus() }) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "Clear the search",
+                            tint = scheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Icon(
+                        Icons.Rounded.FilterList,
+                        contentDescription = null,
+                        tint = scheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -155,8 +185,16 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
                 LedgerFilter.entries.forEach { option ->
                     Chip(option.label, selected = filter == option, onClick = { filter = option })
                 }
-                Chip("September", leading = Icons.Rounded.CalendarMonth, onClick = {})
-                Chip("Tagged", leading = Icons.Rounded.Sell, onClick = {})
+                Chip(
+                    thisMonth.month.getDisplayName(JavaTextStyle.FULL, Locale.getDefault()),
+                    leading = Icons.Rounded.CalendarMonth,
+                )
+                Chip(
+                    "Tagged",
+                    selected = taggedOnly,
+                    leading = Icons.Rounded.Sell,
+                    onClick = { taggedOnly = !taggedOnly },
+                )
             }
         }
 
@@ -164,8 +202,13 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
             item {
                 EmptyWater(
                     title = "Nothing matches",
-                    body = "No transaction in this month matches \"$query\". Clear the search, or " +
-                        "widen the filter above.",
+                    body = if (taggedOnly && query.isBlank()) {
+                        "Nothing this month carries a tag yet. Tags are added when you log or " +
+                            "edit a transaction."
+                    } else {
+                        "No transaction in this month matches \"$query\". Clear the search, or " +
+                            "widen the filter above."
+                    },
                     modifier = Modifier.padding(top = 24.dp),
                     actionLabel = "Clear search",
                     actionIcon = Icons.Rounded.Check,
@@ -229,34 +272,77 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
 @Composable
 fun TransactionEditorScreen(
     state: LedgerState,
+    rates: RatesStore,
+    editing: Txn? = null,
+    /** What a receipt scan read, if the user arrived that way. */
+    prefill: ReceiptGuess? = null,
+    onPrefillUsed: () -> Unit = {},
     onBack: () -> Unit,
+    onGo: (String) -> Unit = {},
     onSave: (
+        id: String?,
         merchant: String,
         categoryId: String,
         accountId: String,
         amountMinor: Long,
         flow: Flow,
         note: String?,
+        foreign: ForeignAmount?,
     ) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     val confirm = LocalConfirm.current
     val haptics = LocalHapticFeedback.current
-    var digits by remember { mutableStateOf("") }
-    var flow by remember { mutableStateOf(Flow.Out) }
-    var merchant by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+    // Keyed on the row being edited, so opening an existing transaction fills the form with it
+    // and opening a new one starts clean.
+    var digits by remember(editing) {
+        mutableStateOf(editing?.amountMinor?.absoluteValue?.toString().orEmpty())
+    }
+    var flow by remember(editing) { mutableStateOf(editing?.flow ?: Flow.Out) }
+    var merchant by remember(editing) { mutableStateOf(editing?.merchant.orEmpty()) }
+    var note by remember(editing) { mutableStateOf(editing?.note.orEmpty()) }
 
     // Left empty until the user picks something, so the first category and account to arrive from
     // the database become the defaults without ever overwriting a choice already made.
-    var pickedCategory by remember { mutableStateOf("") }
-    var pickedAccount by remember { mutableStateOf("") }
+    var pickedCategory by remember(editing) { mutableStateOf(editing?.categoryId.orEmpty()) }
+    var pickedAccount by remember(editing) { mutableStateOf(editing?.accountId.orEmpty()) }
     val categoryId = pickedCategory.ifEmpty { state.categories.firstOrNull()?.id.orEmpty() }
     val accountId = pickedAccount.ifEmpty { state.accounts.firstOrNull()?.id.orEmpty() }
 
+    // Filled in once, then cleared, so returning to this screen later starts clean and an
+    // edited figure is never overwritten by the scan that started it.
+    LaunchedEffect(prefill) {
+        prefill?.let { guess ->
+            guess.totalMinor?.let { digits = it.toString() }
+            guess.merchant?.let { merchant = it }
+            onPrefillUsed()
+        }
+    }
+
     val minor = digits.toLongOrNull() ?: 0L
-    val signed = if (flow == Flow.In) minor else -minor
+
+    // Multi-currency, only when it is switched on. Everyone else never sees a currency control.
+    val multiCurrency = rates.multiCurrencyEnabled
+    val accountCurrency = Accounts[accountId].currency
+    var pickedCurrency by remember(accountId, editing) {
+        mutableStateOf(editing?.originalCurrency ?: accountCurrency)
+    }
+    val table = remember(multiCurrency) { rates.cached() }
+    val foreignEntry = multiCurrency && pickedCurrency != accountCurrency
+
+    // What lands in the ledger is always the account's own currency.
+    val convertedMinor = if (!foreignEntry) minor else {
+        table?.let { convertMinor(minor, pickedCurrency, accountCurrency, it) }
+    }
+    val rateMicros = table?.let { t ->
+        val from = t.microsFor(pickedCurrency)
+        val to = t.microsFor(accountCurrency)
+        if (from == null || to == null || from == 0L) null else to * RATE_SCALE / from
+    }
+    val missingRate = foreignEntry && (convertedMinor == null || rateMicros == null)
+
+    val signed = if (flow == Flow.In) (convertedMinor ?: 0L) else -(convertedMinor ?: 0L)
 
     // Feedback, not decoration: the figure answers the key you just pressed, so a hurried tap in
     // a queue is confirmed without looking closely. Material's own grammar, not a second gesture.
@@ -269,7 +355,7 @@ fun TransactionEditorScreen(
         }
     }
 
-    DetailScaffold(title = "Log", onBack = onBack) {
+    DetailScaffold(title = if (editing == null) "Log" else "Edit", onBack = onBack) {
         item {
             Plate(Modifier.padding(top = 4.dp)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -339,6 +425,49 @@ fun TransactionEditorScreen(
             }
         }
 
+        if (multiCurrency) {
+            item { SectionHeading("Currency", caption = "What you actually paid in") }
+            item {
+                ChipRow {
+                    (listOf(accountCurrency) + SUPPORTED_CURRENCIES.filter { it != accountCurrency })
+                        .forEach { code ->
+                            Chip(
+                                code,
+                                selected = pickedCurrency == code,
+                                onClick = { pickedCurrency = code },
+                            )
+                        }
+                }
+            }
+            if (foreignEntry) {
+                item {
+                    Plate(Modifier.padding(top = 12.dp), depth = 1) {
+                        if (missingRate) {
+                            Flag(
+                                Icons.Rounded.Check,
+                                "No rate for $pickedCurrency. Set one in Currencies.",
+                                water.alert,
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Goes in as ${money(convertedMinor ?: 0L, accountCurrency)}",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = scheme.onSurface,
+                                )
+                                Text(
+                                    "Converted once, now, and kept with the transaction. Later rate " +
+                                        "changes will not rewrite it.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item { SectionHeading("Merchant") }
         item {
             Plate(padding = 16.dp) {
@@ -391,9 +520,7 @@ fun TransactionEditorScreen(
                     .padding(top = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Pill("Receipt", Icons.Rounded.PhotoCamera, {})
-                Pill("Split", Icons.Rounded.ContentCopy, {})
-                Pill("Tag", Icons.Rounded.Sell, {})
+                Pill("Photograph a receipt", Icons.Rounded.PhotoCamera, { onGo(Routes.SCAN) })
             }
         }
 
@@ -403,19 +530,34 @@ fun TransactionEditorScreen(
         item {
             Box(Modifier.padding(top = 18.dp)) {
                 Pill(
-                    label = if (minor == 0L) "Enter an amount" else "Log ${money(signed, showSign = true)}",
+                    label = when {
+                        missingRate -> "No rate for $pickedCurrency"
+                        minor == 0L -> "Enter an amount"
+                        editing != null -> "Save changes"
+                        else -> "Log ${money(signed, showSign = true)}"
+                    },
                     icon = Icons.Rounded.Check,
                     onClick = {
-                        if (minor == 0L || categoryId.isEmpty() || accountId.isEmpty()) return@Pill
                         // The one moment in the app where money is committed. It gets the one
                         // piece of haptic feedback, so the confirmation reaches the hand as well
                         // as the eye.
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSave(merchant, categoryId, accountId, minor, flow, note.ifBlank { null })
-                        confirm("Logged ${money(signed, showSign = true)} to ${Accounts[accountId].name}")
+                        onSave(
+                            editing?.id, merchant, categoryId, accountId,
+                            convertedMinor ?: minor, flow, note.ifBlank { null },
+                            if (foreignEntry && rateMicros != null) {
+                                ForeignAmount(minor, pickedCurrency, rateMicros)
+                            } else null,
+                        )
+                        confirm(
+                            if (editing != null) "Updated ${money(signed, showSign = true)}"
+                            else "Logged ${money(signed, showSign = true)} to ${Accounts[accountId].name}"
+                        )
                         onBack()
                     },
                     emphasis = minor > 0L,
+                    enabled = minor > 0L && !missingRate &&
+                        categoryId.isNotEmpty() && accountId.isNotEmpty(),
                     container = if (minor == 0L) scheme.surfaceContainer else null,
                     contentColor = if (minor == 0L) scheme.onSurfaceVariant else null,
                     modifier = Modifier.fillMaxWidth(),
@@ -483,7 +625,7 @@ private fun Key(label: String, modifier: Modifier = Modifier, onClick: () -> Uni
     ) {
         if (label == "⌫") {
             Icon(
-                Icons.Rounded.Backspace,
+                Icons.AutoMirrored.Rounded.Backspace,
                 contentDescription = "Delete last digit",
                 tint = scheme.onSurfaceVariant,
             )
@@ -500,7 +642,10 @@ fun TransactionDetailScreen(
     state: LedgerState,
     id: String,
     onBack: () -> Unit,
-    onDelete: (String) -> Unit,
+    onEdit: (String) -> Unit,
+    onDelete: (Txn) -> Unit,
+    onDuplicate: (Txn) -> Unit,
+    onGo: (String) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
@@ -555,11 +700,11 @@ fun TransactionDetailScreen(
                     .padding(top = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Pill("Edit", Icons.Rounded.Edit, {}, emphasis = true)
-                Pill("Duplicate", Icons.Rounded.ContentCopy, {})
+                Pill("Edit", Icons.Rounded.Edit, { onEdit(txn.id) }, emphasis = true)
+                Pill("Duplicate", Icons.Rounded.ContentCopy, { onDuplicate(txn); onBack() })
                 Pill(
                     "Delete", Icons.Rounded.Delete,
-                    { onDelete(txn.id); onBack() },
+                    { onDelete(txn); onBack() },
                     contentColor = water.alert,
                 )
             }
@@ -575,7 +720,7 @@ fun TransactionDetailScreen(
                     txn.originalMinor?.let {
                         Fact(
                             "Original amount",
-                            "€${"%.2f".format(it / 100.0)} converted at 1.086",
+                            money(it, txn.originalCurrency ?: txn.currency),
                         )
                     }
                     if (txn.tags.isNotEmpty()) {
@@ -654,7 +799,7 @@ fun TransactionDetailScreen(
                         "Nothing is uploaded.",
                     actionLabel = "Attach a photo",
                     actionIcon = Icons.Rounded.PhotoCamera,
-                    onAction = {},
+                    onAction = { onGo(Routes.SCAN) },
                 )
             }
         }

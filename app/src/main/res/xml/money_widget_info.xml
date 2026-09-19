@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Three cells by two: enough for the figure, today's spend and the next bill, without pretending a
+  home screen is a dashboard.
+
+  updatePeriodMillis is a half-hourly backstop, not the real mechanism. The widget is refreshed
+  explicitly whenever the ledger changes, because a number on a home screen that is thirty minutes
+  stale is a number that is wrong.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_description" />

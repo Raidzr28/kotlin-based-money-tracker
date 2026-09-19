@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Receipt photographs live in the app's own private storage, never in shared media. A receipt is a
+  record of where somebody was and what they bought; it does not belong in the gallery alongside
+  their holiday pictures, and nothing else on the device can read it here.
+-->
+<paths>
+    <files-path name="receipts" path="receipts/" />
+</paths>

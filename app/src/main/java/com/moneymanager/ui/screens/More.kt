@@ -2,6 +2,10 @@ package com.moneymanager.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
-import androidx.compose.material.icons.rounded.Backspace
+import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Check
@@ -44,21 +48,33 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.LedgerState
+import com.moneymanager.data.RATE_SCALE
+import com.moneymanager.data.RatesStore
+import com.moneymanager.data.SUPPORTED_CURRENCIES
+import com.moneymanager.data.SecurityStore
 import com.moneymanager.data.money
 import com.moneymanager.ui.icon
 import com.moneymanager.ui.Chip
 import com.moneymanager.ui.ChipRow
+import com.moneymanager.ui.EmptyWater
 import com.moneymanager.ui.Flag as FlagChip
 import com.moneymanager.ui.MoneyTheme
+import com.moneymanager.ui.biometricAvailable
+import com.moneymanager.ui.rememberBiometricPrompt
 import com.moneymanager.ui.MoneyType
 import com.moneymanager.ui.NavRow
 import com.moneymanager.ui.Pill
@@ -66,6 +82,7 @@ import com.moneymanager.ui.Plate
 import com.moneymanager.ui.Routes
 import com.moneymanager.ui.ScaffoldNote
 import com.moneymanager.ui.SectionHeading
+import com.moneymanager.ui.WaterPulse
 import com.moneymanager.ui.categoryScale
 
 /* -------------------------------------------------------------------- More */
@@ -275,13 +292,24 @@ fun SettingsScreen(onBack: () -> Unit, onGo: (String) -> Unit, onLoadDemo: () ->
 }
 
 @Composable
-private fun ToggleRow(
+internal fun ToggleRow(
     title: String,
     body: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .toggleable(
+                value = checked,
+                onValueChange = onChange,
+                role = Role.Switch,
+            )
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(
             Modifier
                 .weight(1f)
@@ -294,19 +322,42 @@ private fun ToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
 /* ---------------------------------------------------------------- Security */
 
 @Composable
-fun SecurityScreen(onBack: () -> Unit, onPreviewLock: () -> Unit) {
+fun SecurityScreen(
+    security: SecurityStore,
+    onBack: () -> Unit,
+    onLockNow: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
-    var lock by remember { mutableStateOf(true) }
-    var biometric by remember { mutableStateOf(true) }
-    var hideAmounts by remember { mutableStateOf(false) }
+
+    // Mirrored into composition state so the switches respond immediately; the store is the
+    // authority and is written on every change.
+    var hasPin by remember { mutableStateOf(security.hasPin) }
+    var lock by remember { mutableStateOf(security.lockEnabled) }
+    var biometric by remember { mutableStateOf(security.biometricEnabled) }
+    var hideAmounts by remember { mutableStateOf(security.hideInRecents) }
+    var settingPin by remember { mutableStateOf(false) }
+    val canBiometric = biometricAvailable()
+
+    if (settingPin) {
+        PinSheet(
+            title = if (hasPin) "Change your PIN" else "Choose a PIN",
+            onDismiss = { settingPin = false },
+            onPin = {
+                security.setPin(it)
+                hasPin = true
+                lock = true
+                settingPin = false
+            },
+        )
+    }
 
     DetailScaffold(title = "Lock & privacy", onBack = onBack) {
         item {
@@ -324,22 +375,60 @@ fun SecurityScreen(onBack: () -> Unit, onPreviewLock: () -> Unit) {
         }
 
         item { SectionHeading("Opening the app") }
-        item {
-            Plate {
-                Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    ToggleRow("Require a PIN", "Asked every time the app comes to the front.", lock) { lock = it }
-                    ToggleRow(
-                        "Allow fingerprint or face",
-                        "Uses the phone's own biometric prompt. The PIN always still works.",
-                        biometric,
-                    ) { biometric = it }
-                    ToggleRow(
-                        "Hide amounts in the app switcher",
-                        "Blurs the screenshot Android takes when you switch apps.",
-                        hideAmounts,
-                    ) { hideAmounts = it }
-                    Fact("Auto-lock", "Immediately")
-                    Pill("See the lock screen", Icons.Rounded.Fingerprint, onPreviewLock)
+
+        if (!hasPin) {
+            item {
+                EmptyWater(
+                    "No PIN set",
+                    "Without one, anyone who picks up your unlocked phone can read every " +
+                        "transaction you have logged.",
+                    actionLabel = "Set a PIN",
+                    actionIcon = Icons.Rounded.Lock,
+                    onAction = { settingPin = true },
+                )
+            }
+        } else {
+            item {
+                Plate {
+                    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                        ToggleRow(
+                            "Require a PIN",
+                            "Asked every time the app comes back to the front.",
+                            lock,
+                        ) { lock = it; security.lockEnabled = it }
+
+                        ToggleRow(
+                            if (canBiometric) "Allow fingerprint or face" else "Fingerprint or face",
+                            if (canBiometric) {
+                                "Uses the phone's own prompt. The PIN always still works."
+                            } else {
+                                "No strong biometric is enrolled on this device."
+                            },
+                            biometric && canBiometric,
+                        ) { if (canBiometric) { biometric = it; security.biometricEnabled = it } }
+
+                        ToggleRow(
+                            "Hide amounts in the app switcher",
+                            "Blanks the preview Android takes when you switch apps, and blocks " +
+                                "screenshots. Takes effect next time the app starts.",
+                            hideAmounts,
+                        ) { hideAmounts = it; security.hideInRecents = it }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Pill("Lock now", Icons.Rounded.Lock, onLockNow, emphasis = true)
+                            Pill("Change PIN", Icons.Rounded.Fingerprint, { settingPin = true })
+                        }
+
+                        Pill(
+                            "Remove PIN", Icons.Rounded.Lock,
+                            {
+                                security.clearPin()
+                                hasPin = false
+                                lock = false
+                            },
+                            contentColor = water.alert,
+                        )
+                    }
                 }
             }
         }
@@ -362,6 +451,61 @@ fun SecurityScreen(onBack: () -> Unit, onPreviewLock: () -> Unit) {
             }
         }
         item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+/**
+ * Choosing a PIN: enter it, then enter it again.
+ *
+ * The confirmation is not ceremony. A PIN nobody can reproduce locks the user out of their own
+ * ledger permanently, because there is no account to recover it through and no copy of it
+ * anywhere -- only a salted hash that cannot be reversed.
+ */
+@Composable
+private fun PinSheet(
+    title: String,
+    onDismiss: () -> Unit,
+    onPin: (String) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val water = MoneyTheme.water
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var mismatch by remember { mutableStateOf(false) }
+    val confirming = first.length == PIN_LENGTH
+    val entry = if (confirming) second else first
+
+    LaunchedEffect(second) {
+        if (second.length == PIN_LENGTH) {
+            if (second == first) onPin(second) else {
+                mismatch = true
+                second = ""
+                first = ""
+            }
+        }
+    }
+
+    MoneySheet(title = title, onDismiss = onDismiss) {
+        Text(
+            when {
+                mismatch -> "Those did not match. Start again."
+                confirming -> "Enter it once more."
+                else -> "Four digits. There is no way to recover it, so pick one you will keep."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (mismatch) water.alert else scheme.onSurfaceVariant,
+        )
+
+        PinDots(entry.length, error = mismatch)
+
+        Keypad(
+            onDigit = {
+                mismatch = false
+                if (confirming) second = (second + it).take(PIN_LENGTH)
+                else first = (first + it).take(PIN_LENGTH)
+            },
+            onDelete = { if (confirming) second = second.dropLast(1) else first = first.dropLast(1) },
+        )
     }
 }
 
@@ -400,7 +544,15 @@ fun SyncScreen(onBack: () -> Unit) {
                         backup,
                     ) { backup = it }
                     Fact("Last backup", if (backup) "Never" else "Off")
-                    Pill("Restore from a backup", Icons.Rounded.Download, {})
+                    // Disabled rather than silent: restoring needs a backup to exist and a
+                    // Drive account this build cannot ask for yet. A live-looking button that
+                    // does nothing is worse than a dim one that says why.
+                    Pill("Restore from a backup", Icons.Rounded.Download, {}, enabled = false)
+                    Text(
+                        "Available once a backup has been written.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -440,89 +592,262 @@ fun SyncScreen(onBack: () -> Unit) {
 /* ---------------------------------------------------------------- Currency */
 
 @Composable
-fun CurrencyScreen(onBack: () -> Unit) {
+fun CurrencyScreen(rates: RatesStore, onBack: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    var base by remember { mutableStateOf("USD") }
-    var auto by remember { mutableStateOf(true) }
+    val water = MoneyTheme.water
+    val scope = rememberCoroutineScope()
 
-    val rates = listOf(
-        "EUR" to "0.9210", "GBP" to "0.7845", "IDR" to "15,842.00",
-        "JPY" to "147.31", "SGD" to "1.2914", "AUD" to "1.5077",
-    )
+    var enabled by remember { mutableStateOf(rates.multiCurrencyEnabled) }
+    var base by remember { mutableStateOf(rates.baseCurrency) }
+    var table by remember { mutableStateOf(rates.cached()) }
+    var refreshing by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<String?>(null) }
+
+    fun refresh() {
+        refreshing = true
+        scope.launch {
+            // Off the main thread: this is a network call, and the app must stay responsive when
+            // there is no network to answer it.
+            table = withContext(Dispatchers.IO) { rates.refresh(base) }
+            refreshing = false
+        }
+    }
+
+    editing?.let { code ->
+        ManualRateSheet(
+            currency = code,
+            base = base,
+            current = table?.microsFor(code),
+            onDismiss = { editing = null },
+            onSet = { micros ->
+                rates.setManualRate(code, micros)
+                table = rates.cached()
+                editing = null
+            },
+        )
+    }
 
     DetailScaffold(title = "Currencies", onBack = onBack) {
+        item {
+            Plate(Modifier.padding(top = 4.dp)) {
+                ToggleRow(
+                    "Track more than one currency",
+                    "Adds a currency picker when logging, and converts everything into your base " +
+                        "currency for totals.",
+                    enabled,
+                ) {
+                    enabled = it
+                    rates.multiCurrencyEnabled = it
+                    if (it && rates.isStale()) refresh()
+                }
+            }
+        }
+
+        if (!enabled) {
+            item {
+                ScaffoldNote(
+                    "While this is off the app never touches the network. Everything you log is " +
+                        "in your accounts' own currencies."
+                )
+            }
+            item { Spacer(Modifier.height(12.dp)) }
+            return@DetailScaffold
+        }
+
         item { SectionHeading("Base currency", caption = "Everything totals into this one") }
         item {
             Plate {
                 ChipRow {
-                    listOf("USD", "EUR", "GBP", "IDR", "JPY").forEach {
-                        Chip(it, selected = base == it, onClick = { base = it })
+                    SUPPORTED_CURRENCIES.forEach { code ->
+                        Chip(
+                            code,
+                            selected = base == code,
+                            onClick = {
+                                base = code
+                                rates.baseCurrency = code
+                                refresh()
+                            },
+                        )
                     }
                 }
             }
         }
 
-        item { SectionHeading("Rates") }
+        item {
+            SectionHeading(
+                "Rates",
+                caption = table?.let {
+                    val age = (System.currentTimeMillis() / 1000 - it.fetchedAtEpochSecond) / 3600
+                    when {
+                        it.manual -> "Edited by hand"
+                        it.fetchedAtEpochSecond == 0L -> "Never fetched"
+                        age < 1 -> "Updated within the hour"
+                        age < 48 -> "Updated $age hours ago"
+                        else -> "Updated ${age / 24} days ago"
+                    }
+                } ?: "Nothing fetched yet",
+                actionLabel = if (refreshing) "Updating" else "Update",
+                onAction = { if (!refreshing) refresh() },
+            )
+        }
+
+        if (refreshing) {
+            item { WaterPulse(Modifier.fillMaxWidth().padding(top = 4.dp)) }
+        }
+
         item {
             Plate {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ToggleRow(
-                        "Update rates daily",
-                        "From Frankfurter, which is free, needs no key and has no call limit. " +
-                            "One request a day.",
-                        auto,
-                    ) { auto = it }
-                    Fact("Last updated", "Today, 06:12")
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        rates.forEach { (code, rate) ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    code,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = scheme.onSurface,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    "1 $base = $rate",
-                                    style = MoneyType.small,
-                                    color = scheme.onSurfaceVariant,
-                                )
-                            }
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    val known = table?.perBaseMicros.orEmpty()
+                    if (known.isEmpty()) {
+                        Text(
+                            "No rates yet. Tap Update, or set one by hand below to work offline.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    SUPPORTED_CURRENCIES.filter { it != base }.forEach { code ->
+                        val micros = known[code]
+                        Row(
+                            Modifier.clickable { editing = code },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                code,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = scheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                if (micros == null) "not set" else "1 $base = ${formatRate(micros)}",
+                                style = MoneyType.small,
+                                color = if (micros == null) scheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                else scheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
             }
         }
 
-        item { SectionHeading("Offline") }
+        item { SectionHeading("Where these come from") }
         item {
             Plate(depth = 1) {
-                Text(
-                    "With no network the last known rate is used and the transaction is marked as " +
-                        "converted at that rate. You can override any rate by hand, and the " +
-                        "override sticks to that transaction forever.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = scheme.onSurfaceVariant,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FlagChip(Icons.Rounded.Language, "Frankfurter, from ECB reference rates", water.income)
+                    Text(
+                        "Free, no key, no limit. The request sends one currency code and nothing " +
+                            "else: no account, no amount, no identifier. It is the only outbound " +
+                            "request this app makes.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "With no network the last rate is used and the transaction records the rate " +
+                            "it was converted at, so it never changes afterwards. Tap any currency " +
+                            "to set the rate your bank actually used.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         item { Spacer(Modifier.height(12.dp)) }
     }
 }
 
+/** Typing in the rate a card issuer actually used, which is rarely the ECB's. */
+@Composable
+private fun ManualRateSheet(
+    currency: String,
+    base: String,
+    current: Long?,
+    onDismiss: () -> Unit,
+    onSet: (Long) -> Unit,
+) {
+    var digits by remember { mutableStateOf(current?.let { (it / 100).toString() }.orEmpty()) }
+    val micros = digitsToMinor(digits) * 100
+
+    MoneySheet(title = "1 $base in $currency", onDismiss = onDismiss) {
+        Text(
+            "Your card issuer's rate differs from the reference rate, and reconciling a statement " +
+                "needs the number they actually used.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        AmountInput(digits, { digits = it }, label = "Rate", currency = currency)
+        Pill(
+            if (micros <= 0L) "Enter a rate" else "Use ${formatRate(micros)}",
+            Icons.Rounded.Check,
+            { if (micros > 0L) onSet(micros) },
+            emphasis = micros > 0L,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Micros back to something readable, trimming the trailing zeroes a rate rarely needs. */
+private fun formatRate(micros: Long): String {
+    val whole = micros / RATE_SCALE
+    val fraction = (micros % RATE_SCALE).toString().padStart(6, '0').trimEnd('0').ifEmpty { "0" }
+    return "$whole.$fraction"
+}
+
 /* -------------------------------------------------------------------- Lock */
+
+const val PIN_LENGTH = 4
 
 /**
  * The lock screen is the app's first impression more often than Home is. It gets the same water,
  * the same mark, and a keypad big enough to use without looking.
+ *
+ * The biometric prompt fires by itself on arrival when one is enrolled and enabled, because the
+ * common case is a thumb already on the sensor. Dismissing it leaves the keypad, which always
+ * works.
  */
 @Composable
-fun LockScreen(onUnlock: () -> Unit) {
+fun LockScreen(
+    security: SecurityStore,
+    onUnlock: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
-    var pin by remember { mutableStateOf("") }
+    val haptics = LocalHapticFeedback.current
 
-    LaunchedEffect(pin) { if (pin.length >= 4) onUnlock() }
+    var pin by remember { mutableStateOf("") }
+    var wrong by remember { mutableStateOf(false) }
+    var lockedOutFor by remember { mutableLongStateOf(security.lockoutRemainingMillis()) }
+
+    val biometric = rememberBiometricPrompt(
+        title = "Unlock Money Manager",
+        subtitle = "Or use your PIN",
+        onSuccess = onUnlock,
+    )
+    val canBiometric = biometric != null && security.biometricEnabled
+
+    // Tick the lockout down so the user can see it expire rather than guessing.
+    LaunchedEffect(lockedOutFor) {
+        if (lockedOutFor > 0) {
+            kotlinx.coroutines.delay(1_000)
+            lockedOutFor = security.lockoutRemainingMillis()
+        }
+    }
+
+    LaunchedEffect(Unit) { if (canBiometric && lockedOutFor == 0L) biometric?.invoke() }
+
+    LaunchedEffect(pin) {
+        if (pin.length == PIN_LENGTH) {
+            if (security.verifyPin(pin)) {
+                onUnlock()
+            } else {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                wrong = true
+                lockedOutFor = security.lockoutRemainingMillis()
+                kotlinx.coroutines.delay(400)
+                pin = ""
+            }
+        }
+    }
 
     Column(
         Modifier
@@ -558,55 +883,27 @@ fun LockScreen(onUnlock: () -> Unit) {
             modifier = Modifier.padding(top = 20.dp),
         )
         Text(
-            "Enter your PIN",
+            when {
+                lockedOutFor > 0 -> "Too many attempts. Try again in ${lockedOutFor / 1000 + 1}s."
+                wrong -> "That is not the PIN."
+                else -> "Enter your PIN"
+            },
             style = MaterialTheme.typography.bodyMedium,
-            color = scheme.onSurfaceVariant,
+            color = if (wrong || lockedOutFor > 0) water.alert else scheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 4.dp),
         )
 
-        Row(
-            Modifier.padding(top = 26.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            repeat(4) { i ->
-                Box(
-                    Modifier
-                        .size(14.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (i < pin.length) scheme.primary
-                            else scheme.onSurfaceVariant.copy(alpha = 0.3f)
-                        )
-                )
-            }
-        }
+        Box(Modifier.padding(top = 26.dp)) { PinDots(pin.length, error = wrong) }
 
         Spacer(Modifier.height(32.dp))
 
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            listOf(
-                listOf("1", "2", "3"),
-                listOf("4", "5", "6"),
-                listOf("7", "8", "9"),
-                listOf("bio", "0", "del"),
-            ).forEach { row ->
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    row.forEach { key ->
-                        LockKey(key, Modifier.weight(1f)) {
-                            when (key) {
-                                "del" -> pin = pin.dropLast(1)
-                                "bio" -> onUnlock()
-                                else -> pin = (pin + key).take(4)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        Keypad(
+            enabled = lockedOutFor == 0L,
+            biometric = if (canBiometric) biometric else null,
+            onDigit = { wrong = false; pin = (pin + it).take(PIN_LENGTH) },
+            onDelete = { pin = pin.dropLast(1) },
+        )
 
         Text(
             "Forgot your PIN? The ledger cannot be recovered without it.",
@@ -620,21 +917,85 @@ fun LockScreen(onUnlock: () -> Unit) {
     }
 }
 
+/** Four dots that fill as digits land, and turn to the alert tone on a wrong PIN. */
 @Composable
-private fun LockKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun PinDots(filled: Int, error: Boolean, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
+    val water = MoneyTheme.water
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        repeat(PIN_LENGTH) { i ->
+            Box(
+                Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when {
+                            error -> water.alert
+                            i < filled -> scheme.primary
+                            else -> scheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        }
+                    )
+            )
+        }
+    }
+}
+
+/** The number pad, shared by the lock screen and by choosing a PIN. */
+@Composable
+private fun Keypad(
+    onDigit: (String) -> Unit,
+    onDelete: () -> Unit,
+    enabled: Boolean = true,
+    biometric: (() -> Unit)? = null,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        listOf(
+            listOf("1", "2", "3"),
+            listOf("4", "5", "6"),
+            listOf("7", "8", "9"),
+            listOf(if (biometric != null) "bio" else "", "0", "del"),
+        ).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { key ->
+                    LockKey(key, Modifier.weight(1f), enabled = enabled) {
+                        when (key) {
+                            "" -> Unit
+                            "del" -> onDelete()
+                            "bio" -> biometric?.invoke()
+                            else -> onDigit(key)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LockKey(
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    if (label.isEmpty()) {
+        Box(modifier.height(62.dp))
+        return
+    }
     Box(
         modifier
             .height(62.dp)
             .clip(RoundedCornerShape(22.dp))
-            .background(scheme.surfaceContainer.copy(alpha = 0.85f))
-            .clickable(onClick = onClick),
+            .background(scheme.surfaceContainer.copy(alpha = if (enabled) 0.85f else 0.4f))
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
+        val tint = if (enabled) scheme.onSurface else scheme.onSurfaceVariant.copy(alpha = 0.5f)
         when (label) {
-            "del" -> Icon(Icons.Rounded.Backspace, "Delete last digit", tint = scheme.onSurfaceVariant)
+            "del" -> Icon(Icons.AutoMirrored.Rounded.Backspace, "Delete last digit", tint = tint)
             "bio" -> Icon(Icons.Rounded.Fingerprint, "Unlock with fingerprint", tint = scheme.primary)
-            else -> Text(label, style = MoneyType.medium, color = scheme.onSurface)
+            else -> Text(label, style = MoneyType.medium, color = tint)
         }
     }
 }

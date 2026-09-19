@@ -15,6 +15,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
@@ -34,17 +39,30 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.moneymanager.R
 import com.moneymanager.data.LedgerState
 import com.moneymanager.data.Account
+import com.moneymanager.data.AppPrefs
+import com.moneymanager.data.Bill
+import com.moneymanager.data.Debt
+import com.moneymanager.data.Goal
+import com.moneymanager.data.Recurrence
+import com.moneymanager.data.canNotify
+import com.moneymanager.data.scheduleReminders
+import com.moneymanager.data.dayOfMonth
+import com.moneymanager.data.daysInMonth
+import com.moneymanager.data.thisMonth
 import com.moneymanager.data.AccountKind
 import com.moneymanager.data.Accounts
 import com.moneymanager.data.short
@@ -87,9 +105,35 @@ private fun goalPhoto(id: String): Int = when (id) {
 /* ---------------------------------------------------------------- Accounts */
 
 @Composable
-fun AccountsScreen(state: LedgerState, onBack: () -> Unit, onOpenAccount: (String) -> Unit) {
+fun AccountsScreen(
+    state: LedgerState,
+    onBack: () -> Unit,
+    onOpenAccount: (String) -> Unit,
+    onSaveAccount: (name: String, kind: AccountKind, openingMinor: Long, limitMinor: Long?) -> Unit,
+    onTransfer: (fromId: String, toId: String, amountMinor: Long) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
+    var adding by remember { mutableStateOf(false) }
+    var transferring by remember { mutableStateOf(false) }
+
+    if (adding) {
+        AccountSheet(
+            onDismiss = { adding = false },
+            onSave = { name, kind, opening, limit ->
+                onSaveAccount(name, kind, opening, limit)
+                adding = false
+            },
+        )
+    }
+
+    if (transferring) {
+        TransferSheet(
+            state = state,
+            onDismiss = { transferring = false },
+            onTransfer = { from, to, amount -> onTransfer(from, to, amount); transferring = false },
+        )
+    }
     val owned = Accounts.all.filter { it.balanceMinor >= 0 }.sumOf { it.balanceMinor }
     val owed = Accounts.all.filter { it.balanceMinor < 0 }.sumOf { -it.balanceMinor }
 
@@ -102,8 +146,10 @@ fun AccountsScreen(state: LedgerState, onBack: () -> Unit, onOpenAccount: (Strin
                         Stat("Spendable now", state.liquidMinor, style = MoneyType.medium)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Pill("Transfer", Icons.Rounded.SwapHoriz, {}, emphasis = true)
-                        Pill("Reconcile", Icons.Rounded.Check, {})
+                        Pill("Add account", Icons.Rounded.Add, { adding = true }, emphasis = true)
+                        if (state.accounts.size >= 2) {
+                            Pill("Transfer", Icons.Rounded.SwapHoriz, { transferring = true })
+                        }
                     }
                 }
             }
@@ -127,13 +173,136 @@ fun AccountsScreen(state: LedgerState, onBack: () -> Unit, onOpenAccount: (Strin
             EmptyWater(
                 "No assets tracked yet",
                 "A motorbike, a laptop, a fridge. Record what it cost and when the warranty ends, " +
-                    "and it counts toward net worth instead of vanishing the day you bought it.",
-                actionLabel = "Add an asset",
-                actionIcon = Icons.Rounded.Bolt,
-                onAction = {},
+                    "and it counts toward net worth instead of vanishing the day you bought it. " +
+                    "Not built yet.",
             )
         }
         item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+/**
+ * Moving money between two accounts you own.
+ *
+ * Not income and not spending: nothing entered or left your finances, it changed pockets. The two
+ * rows this writes are flagged as transfers precisely so they move the balances without ever
+ * appearing in a spending report.
+ */
+@Composable
+private fun TransferSheet(
+    state: LedgerState,
+    onDismiss: () -> Unit,
+    onTransfer: (String, String, Long) -> Unit,
+) {
+    var fromId by remember { mutableStateOf(state.accounts.firstOrNull()?.id.orEmpty()) }
+    var toId by remember { mutableStateOf(state.accounts.getOrNull(1)?.id.orEmpty()) }
+    var digits by remember { mutableStateOf("") }
+    val amount = digitsToMinor(digits)
+    val valid = amount > 0L && fromId.isNotEmpty() && toId.isNotEmpty() && fromId != toId
+
+    MoneySheet(title = "Transfer", onDismiss = onDismiss) {
+        Text(
+            "Out of",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ChipRow {
+            state.accounts.forEach { account ->
+                Chip(
+                    account.name,
+                    selected = fromId == account.id,
+                    leading = accountIcon(account.kind),
+                    onClick = { fromId = account.id; if (toId == account.id) toId = "" },
+                )
+            }
+        }
+
+        Text(
+            "Into",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ChipRow {
+            state.accounts.filter { it.id != fromId }.forEach { account ->
+                Chip(
+                    account.name,
+                    selected = toId == account.id,
+                    leading = accountIcon(account.kind),
+                    onClick = { toId = account.id },
+                )
+            }
+        }
+
+        AmountInput(digits, { digits = it }, label = "Amount")
+
+        Pill(
+            when {
+                amount == 0L -> "Enter an amount"
+                !valid -> "Pick two different accounts"
+                else -> "Move ${money(amount)}"
+            },
+            Icons.Rounded.SwapHoriz,
+            { if (valid) onTransfer(fromId, toId, amount) },
+            emphasis = valid,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * A new account is a name, what kind it is, and what was in it before you started logging.
+ *
+ * The opening balance matters more than it looks: every balance in the app is that figure plus
+ * the transactions since, so getting it right here is what makes the ledger agree with the bank
+ * without anyone having to back-fill a year of history.
+ */
+@Composable
+private fun AccountSheet(
+    onDismiss: () -> Unit,
+    onSave: (String, AccountKind, Long, Long?) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf(AccountKind.Bank) }
+    var opening by remember { mutableStateOf("") }
+    var limit by remember { mutableStateOf("") }
+
+    MoneySheet(title = "Add an account", onDismiss = onDismiss) {
+        TextInput(name, { name = it }, label = "Name", placeholder = "Everyday, Cash, Visa ...")
+
+        ChipRow {
+            AccountKind.entries.forEach { option ->
+                Chip(
+                    option.label,
+                    selected = kind == option,
+                    leading = accountIcon(option),
+                    onClick = { kind = option },
+                )
+            }
+        }
+
+        AmountInput(
+            opening, { opening = it },
+            label = if (kind == AccountKind.Card) "Currently owed" else "Balance right now",
+        )
+
+        if (kind == AccountKind.Card) {
+            AmountInput(limit, { limit = it }, label = "Credit limit")
+        }
+
+        Pill(
+            if (name.isBlank()) "Name it first" else "Add ${name.trim()}",
+            Icons.Rounded.Check,
+            {
+                if (name.isNotBlank()) {
+                    // A card's balance is money owed, so it is stored negative and every screen
+                    // reads the sign rather than special-casing the account kind.
+                    val signed = if (kind == AccountKind.Card) -digitsToMinor(opening) else digitsToMinor(opening)
+                    onSave(name, kind, signed, digitsToMinor(limit).takeIf { it > 0 })
+                }
+            },
+            emphasis = name.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -275,21 +444,81 @@ fun AccountDetailScreen(
 /* ------------------------------------------------------------------- Bills */
 
 @Composable
-fun BillsScreen(state: LedgerState, onBack: () -> Unit) {
+fun BillsScreen(
+    state: LedgerState,
+    prefs: AppPrefs,
+    onBack: () -> Unit,
+    onSaveBill: (Bill) -> Unit,
+    onPayBill: (String) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
+    val context = LocalContext.current
+
     val overdue = state.bills.filter { it.due < today }.sortedBy { it.due }
     val soon = state.bills.filter { it.due >= today }.sortedBy { it.due }
     val subs = state.bills.filter { it.subscription }
     val idle = subs.filter { (it.idleMonths ?: 0) >= 3 }
 
+    var adding by remember { mutableStateOf(false) }
+    var remindersOn by remember { mutableStateOf(prefs.remindersEnabled && canNotify(context)) }
+
+    val askPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        prefs.remindersEnabled = granted
+        remindersOn = granted
+        scheduleReminders(context, prefs)
+    }
+
+    fun setReminders(on: Boolean) {
+        if (!on) {
+            prefs.remindersEnabled = false
+            remindersOn = false
+            scheduleReminders(context, prefs)
+            return
+        }
+        if (canNotify(context)) {
+            prefs.remindersEnabled = true
+            remindersOn = true
+            scheduleReminders(context, prefs)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            askPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    if (adding) {
+        BillSheet(
+            state = state,
+            onDismiss = { adding = false },
+            onSave = { onSaveBill(it); adding = false },
+        )
+    }
+
     DetailScaffold(title = "Bills & subscriptions", onBack = onBack) {
         item {
             Plate(Modifier.padding(top = 4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(26.dp)) {
-                    Stat("Left this month", state.committedMinor, style = MoneyType.large)
-                    Stat("Subscriptions", subs.sumOf { it.amountMinor }, style = MoneyType.medium)
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(26.dp)) {
+                        Stat("Left this month", state.committedMinor, style = MoneyType.large)
+                        Stat("Subscriptions", subs.sumOf { it.amountMinor }, style = MoneyType.medium)
+                    }
+                    Pill("Add a bill", Icons.Rounded.Add, { adding = true }, emphasis = true)
                 }
+            }
+        }
+
+        if (state.bills.isEmpty()) {
+            item {
+                EmptyWater(
+                    "Nothing tracked yet",
+                    "Add the things that go out on their own -- rent, utilities, subscriptions -- " +
+                        "and the app can warn you before each one lands.",
+                    modifier = Modifier.padding(top = 20.dp),
+                    actionLabel = "Add a bill",
+                    actionIcon = Icons.Rounded.Add,
+                    onAction = { adding = true },
+                )
             }
         }
 
@@ -297,30 +526,39 @@ fun BillsScreen(state: LedgerState, onBack: () -> Unit) {
             item { SectionHeading("Overdue", caption = "Pay or reschedule these first") }
             item {
                 Plate {
-                    Column { overdue.forEach { BillRow(it) } }
+                    Column { overdue.forEach { bill -> BillRow(bill, onPay = { onPayBill(bill.id) }) } }
                 }
             }
         }
 
-        item { SectionHeading("Due dates", caption = "Every payment this month, and how they cluster") }
-        item {
-            Plate {
-                DueCalendar(
-                    dueDays = state.bills
-                        .filter { java.time.YearMonth.from(it.due) == com.moneymanager.data.thisMonth }
-                        .map { it.due.dayOfMonth }
-                        .toSet(),
-                    daysInMonth = com.moneymanager.data.daysInMonth,
-                    firstDayOffset = com.moneymanager.data.thisMonth.atDay(1).dayOfWeek.value - 1,
-                    todayDay = com.moneymanager.data.dayOfMonth,
+        if (state.bills.isNotEmpty()) {
+            item {
+                SectionHeading(
+                    "Due dates",
+                    caption = "Every payment this month, and how they cluster",
                 )
+            }
+            item {
+                Plate {
+                    DueCalendar(
+                        dueDays = state.bills
+                            .filter { java.time.YearMonth.from(it.due) == thisMonth }
+                            .map { it.due.dayOfMonth }
+                            .toSet(),
+                        daysInMonth = daysInMonth,
+                        firstDayOffset = thisMonth.atDay(1).dayOfWeek.value - 1,
+                        todayDay = dayOfMonth,
+                    )
+                }
             }
         }
 
-        item { SectionHeading("Coming up", caption = "Next ${soon.size} payments") }
-        item {
-            Plate {
-                Column { soon.forEach { BillRow(it) } }
+        if (soon.isNotEmpty()) {
+            item { SectionHeading("Coming up", caption = "Next ${soon.size} payments") }
+            item {
+                Plate {
+                    Column { soon.forEach { bill -> BillRow(bill, onPay = { onPayBill(bill.id) }) } }
+                }
             }
         }
 
@@ -328,7 +566,7 @@ fun BillsScreen(state: LedgerState, onBack: () -> Unit) {
             item {
                 SectionHeading(
                     "Paying for, not using",
-                    caption = "Flagged from how long since the last related transaction",
+                    caption = "Measured from when you last marked each one paid",
                 )
             }
             item {
@@ -350,15 +588,11 @@ fun BillsScreen(state: LedgerState, onBack: () -> Unit) {
                                         color = scheme.onSurfaceVariant,
                                     )
                                 }
-                                FlagChip(
-                                    Icons.Rounded.Bolt,
-                                    "${bill.idleMonths} mo idle",
-                                    water.alert,
-                                )
+                                FlagChip(Icons.Rounded.Bolt, "${bill.idleMonths} mo idle", water.alert)
                             }
                         }
                         Text(
-                            "Cancelling both would free ${money(idle.sumOf { it.amountMinor } * 12)} a year.",
+                            "Cancelling these would free ${money(idle.sumOf { it.amountMinor } * 12)} a year.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = scheme.onSurfaceVariant,
                         )
@@ -370,12 +604,49 @@ fun BillsScreen(state: LedgerState, onBack: () -> Unit) {
         item { SectionHeading("Reminders") }
         item {
             Plate {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Fact("Notify", "Two days before, at 09:00")
-                    Fact("Delivered by", "A scheduled job on this device")
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ToggleRow(
+                        "Remind me before a bill is due",
+                        if (remindersOn) {
+                            "Checked once a day on this device. Nothing about your bills is sent anywhere."
+                        } else {
+                            "Needs permission to show notifications."
+                        },
+                        remindersOn,
+                    ) { setReminders(it) }
+
+                    if (remindersOn) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "How much warning",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = scheme.onSurface,
+                            )
+                            var lead by remember { mutableIntStateOf(prefs.remindDaysBefore) }
+                            ChipRow {
+                                listOf(0, 1, 2, 3, 7).forEach { days ->
+                                    Chip(
+                                        when (days) {
+                                            0 -> "On the day"
+                                            1 -> "1 day"
+                                            else -> "$days days"
+                                        },
+                                        selected = lead == days,
+                                        onClick = {
+                                            lead = days
+                                            prefs.remindDaysBefore = days
+                                            scheduleReminders(context, prefs)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        Fact("Checked at", "${prefs.remindHour}:00, give or take")
+                    }
+
                     Text(
-                        "Reminders are local. They fire with no network and nothing about your " +
-                            "bills leaves the phone.",
+                        "Reminders are produced on this device from bills you entered. There is no " +
+                            "server involved and nothing to sign into.",
                         style = MaterialTheme.typography.bodySmall,
                         color = scheme.onSurfaceVariant,
                     )
@@ -386,13 +657,128 @@ fun BillsScreen(state: LedgerState, onBack: () -> Unit) {
     }
 }
 
+/**
+ * A bill is a name, an amount, a date, and how often it comes back.
+ *
+ * Marking one paid logs the money going out and rolls the date forward, which is what keeps the
+ * "paying for, not using" list honest: it measures from the last time you actually paid.
+ */
+@Composable
+private fun BillSheet(
+    state: LedgerState,
+    onDismiss: () -> Unit,
+    onSave: (Bill) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var digits by remember { mutableStateOf("") }
+    var due by remember { mutableStateOf(today.plusDays(7)) }
+    var every by remember { mutableStateOf(Recurrence.Monthly) }
+    var accountId by remember { mutableStateOf(state.accounts.firstOrNull()?.id.orEmpty()) }
+    var subscription by remember { mutableStateOf(false) }
+    val amount = digitsToMinor(digits)
+    val valid = name.isNotBlank() && amount > 0L && accountId.isNotEmpty()
+
+    MoneySheet(title = "Add a bill", onDismiss = onDismiss) {
+        TextInput(name, { name = it }, label = "Name", placeholder = "Rent, Netflix, insurance ...")
+        AmountInput(digits, { digits = it }, label = "Amount")
+        DateField("Next due", due, onDate = { due = it })
+
+        ChipRow {
+            Recurrence.entries.forEach { option ->
+                Chip(option.label, selected = every == option, onClick = { every = option })
+            }
+        }
+
+        ChipRow {
+            state.accounts.forEach { account ->
+                Chip(
+                    account.name,
+                    selected = accountId == account.id,
+                    leading = accountIcon(account.kind),
+                    onClick = { accountId = account.id },
+                )
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(end = 16.dp)
+            ) {
+                Text(
+                    "It is a subscription",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    "Subscriptions get flagged when you stop marking them paid.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = subscription, onCheckedChange = { subscription = it })
+        }
+
+        Pill(
+            if (!valid) "Name it and give it an amount" else "Add ${name.trim()}",
+            Icons.Rounded.Check,
+            {
+                if (valid) {
+                    onSave(
+                        Bill(
+                            id = "",
+                            name = name.trim(),
+                            amountMinor = amount,
+                            due = due,
+                            every = every,
+                            accountId = accountId,
+                            subscription = subscription,
+                        )
+                    )
+                }
+            },
+            emphasis = valid,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
 /* ------------------------------------------------------------------- Goals */
 
 @Composable
-fun GoalsScreen(state: LedgerState, onBack: () -> Unit, onGo: (String) -> Unit) {
+fun GoalsScreen(
+    state: LedgerState,
+    onBack: () -> Unit,
+    onGo: (String) -> Unit,
+    onSaveGoal: (Goal) -> Unit,
+    onContribute: (goalId: String, fromAccountId: String, amountMinor: Long) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     val scale = categoryScale()
+    var adding by remember { mutableStateOf(false) }
+    var contributingTo by remember { mutableStateOf<Goal?>(null) }
+
+    if (adding) {
+        GoalSheet(
+            state = state,
+            onDismiss = { adding = false },
+            onSave = { onSaveGoal(it); adding = false },
+        )
+    }
+
+    contributingTo?.let { goal ->
+        ContributeSheet(
+            state = state,
+            goal = goal,
+            onDismiss = { contributingTo = null },
+            onContribute = { from, amount ->
+                onContribute(goal.id, from, amount)
+                contributingTo = null
+            },
+        )
+    }
 
     DetailScaffold(title = "Goals", onBack = onBack) {
         item {
@@ -423,6 +809,7 @@ fun GoalsScreen(state: LedgerState, onBack: () -> Unit, onGo: (String) -> Unit) 
                             style = MaterialTheme.typography.bodyLarge,
                             color = scheme.onSurface,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             MoneyText(
@@ -448,7 +835,25 @@ fun GoalsScreen(state: LedgerState, onBack: () -> Unit, onGo: (String) -> Unit) 
             )
         }
 
-        item { SectionHeading("Every goal") }
+        item {
+            SectionHeading(
+                "Every goal",
+                actionLabel = "New goal",
+                onAction = { adding = true },
+            )
+        }
+        if (state.goals.isEmpty()) {
+            item {
+                EmptyWater(
+                    "Nothing being saved for yet",
+                    "Name the thing, say how much it costs and by when. The water rises over it " +
+                        "as you put money aside.",
+                    actionLabel = "New goal",
+                    actionIcon = Icons.Rounded.Savings,
+                    onAction = { adding = true },
+                )
+            }
+        }
         items(state.goals.size) { index ->
             val goal = state.goals[index]
             val monthsLeft = ChronoUnit.MONTHS.between(today, goal.by).coerceAtLeast(1)
@@ -477,6 +882,11 @@ fun GoalsScreen(state: LedgerState, onBack: () -> Unit, onGo: (String) -> Unit) 
                         )
                     }
                     WaterBar(goal.fraction, modifier = Modifier.fillMaxWidth(), height = 12.dp)
+                    Pill(
+                        "Add money", Icons.Rounded.Savings,
+                        { contributingTo = goal },
+                        container = MaterialTheme.colorScheme.surfaceContainerLow,
+                    )
                     Text(
                         "${money(perMonth)} a month for $monthsLeft months hits it by " +
                             "${goal.by.dayOfMonth} ${goal.by.month.short()} ${goal.by.year}",
@@ -514,10 +924,30 @@ fun GoalsScreen(state: LedgerState, onBack: () -> Unit, onGo: (String) -> Unit) 
 /* -------------------------------------------------------------------- Debt */
 
 @Composable
-fun DebtScreen(state: LedgerState, onBack: () -> Unit) {
+fun DebtScreen(
+    state: LedgerState,
+    onBack: () -> Unit,
+    onSaveDebt: (Debt) -> Unit,
+    onPayDebt: (debtId: String, fromAccountId: String, amountMinor: Long) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     var avalanche by remember { mutableStateOf(true) }
+    var adding by remember { mutableStateOf(false) }
+    var payingOff by remember { mutableStateOf<Debt?>(null) }
+
+    if (adding) {
+        DebtSheet(onDismiss = { adding = false }, onSave = { onSaveDebt(it); adding = false })
+    }
+
+    payingOff?.let { debt ->
+        PayDebtSheet(
+            state = state,
+            debt = debt,
+            onDismiss = { payingOff = null },
+            onPay = { from, amount -> onPayDebt(debt.id, from, amount); payingOff = null },
+        )
+    }
 
     val ordered = if (avalanche) {
         state.debts.sortedByDescending { it.aprBasisPoints }
@@ -580,7 +1010,25 @@ fun DebtScreen(state: LedgerState, onBack: () -> Unit) {
             )
         }
 
-        item { SectionHeading("Pay in this order") }
+        item {
+            SectionHeading(
+                "Pay in this order",
+                actionLabel = "Add a debt",
+                onAction = { adding = true },
+            )
+        }
+        if (state.debts.isEmpty()) {
+            item {
+                EmptyWater(
+                    "No debts tracked",
+                    "Add what you owe and this orders it for you, either cheapest overall or " +
+                        "quickest to clear.",
+                    actionLabel = "Add a debt",
+                    actionIcon = Icons.Rounded.Flag,
+                    onAction = { adding = true },
+                )
+            }
+        }
         item {
             Plate {
                 Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -620,12 +1068,224 @@ fun DebtScreen(state: LedgerState, onBack: () -> Unit) {
                                 )
                             }
                             MoneyText(debt.balanceMinor, style = MoneyType.row, color = scheme.onSurface)
+                            Pill(
+                                "Pay", Icons.Rounded.Check, { payingOff = debt },
+                                modifier = Modifier.padding(start = 10.dp),
+                                container = scheme.surfaceContainerLow,
+                            )
                         }
                     }
                 }
             }
         }
         item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+/** Naming a thing worth saving for. */
+@Composable
+private fun GoalSheet(
+    state: LedgerState,
+    onDismiss: () -> Unit,
+    onSave: (Goal) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var target by remember { mutableStateOf("") }
+    var saved by remember { mutableStateOf("") }
+    var by by remember { mutableStateOf(today.plusMonths(6)) }
+    var accountId by remember {
+        mutableStateOf(
+            state.accounts.firstOrNull { it.kind == AccountKind.Savings }?.id
+                ?: state.accounts.firstOrNull()?.id.orEmpty()
+        )
+    }
+    val targetMinor = digitsToMinor(target)
+    val valid = name.isNotBlank() && targetMinor > 0L && accountId.isNotEmpty()
+
+    MoneySheet(title = "New goal", onDismiss = onDismiss) {
+        TextInput(name, { name = it }, label = "What for", placeholder = "Emergency fund, a trip ...")
+        AmountInput(target, { target = it }, label = "How much it costs")
+        AmountInput(saved, { saved = it }, label = "Put aside already")
+        DateField("Wanted by", by, onDate = { by = it })
+
+        Text(
+            "Held in",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ChipRow {
+            state.accounts.forEach { account ->
+                Chip(
+                    account.name,
+                    selected = accountId == account.id,
+                    leading = accountIcon(account.kind),
+                    onClick = { accountId = account.id },
+                )
+            }
+        }
+
+        Pill(
+            if (!valid) "Name it and give it a target" else "Start saving for ${name.trim()}",
+            Icons.Rounded.Check,
+            {
+                if (valid) {
+                    onSave(
+                        Goal(
+                            id = "", name = name.trim(), targetMinor = targetMinor,
+                            savedMinor = digitsToMinor(saved), by = by, accountId = accountId,
+                        )
+                    )
+                }
+            },
+            emphasis = valid,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Putting money into a goal, which is a real transfer whenever the money actually moves. */
+@Composable
+private fun ContributeSheet(
+    state: LedgerState,
+    goal: Goal,
+    onDismiss: () -> Unit,
+    onContribute: (String, Long) -> Unit,
+) {
+    var digits by remember { mutableStateOf("") }
+    var fromId by remember { mutableStateOf(goal.accountId) }
+    val amount = digitsToMinor(digits)
+    val moves = fromId != goal.accountId
+
+    MoneySheet(title = "Add to ${goal.name}", onDismiss = onDismiss) {
+        AmountInput(digits, { digits = it }, label = "How much")
+
+        Text(
+            "Out of",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ChipRow {
+            state.accounts.forEach { account ->
+                Chip(
+                    account.name,
+                    selected = fromId == account.id,
+                    leading = accountIcon(account.kind),
+                    onClick = { fromId = account.id },
+                )
+            }
+        }
+
+        Text(
+            if (moves) {
+                "Moves ${money(amount)} into ${Accounts[goal.accountId].name} and records the transfer."
+            } else {
+                "Already in ${Accounts[goal.accountId].name}, so nothing moves. This just earmarks it."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Pill(
+            if (amount == 0L) "Enter an amount" else "Add ${money(amount)}",
+            Icons.Rounded.Savings,
+            { if (amount > 0L) onContribute(fromId, amount) },
+            emphasis = amount > 0L,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** What you owe, and on what terms. */
+@Composable
+private fun DebtSheet(onDismiss: () -> Unit, onSave: (Debt) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var balance by remember { mutableStateOf("") }
+    var apr by remember { mutableStateOf("") }
+    var minimum by remember { mutableStateOf("") }
+    val balanceMinor = digitsToMinor(balance)
+    val valid = name.isNotBlank() && balanceMinor > 0L
+
+    MoneySheet(title = "Add a debt", onDismiss = onDismiss) {
+        TextInput(name, { name = it }, label = "What it is", placeholder = "Card, loan, money owed ...")
+        AmountInput(balance, { balance = it }, label = "Owed right now")
+        // Entered as a percentage with two decimals and held as basis points, so 21.99% is exact
+        // rather than a float that is nearly 21.99.
+        AmountInput(apr, { apr = it }, label = "Interest rate, % a year", currency = "")
+        AmountInput(minimum, { minimum = it }, label = "Minimum payment a month")
+
+        Text(
+            "The rate decides the order under Avalanche. Leave it empty for something " +
+                "interest-free, like money owed to family.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Pill(
+            if (!valid) "Name it and give it a balance" else "Track ${name.trim()}",
+            Icons.Rounded.Check,
+            {
+                if (valid) {
+                    onSave(
+                        Debt(
+                            id = "", name = name.trim(), balanceMinor = balanceMinor,
+                            aprBasisPoints = digitsToMinor(apr).toInt(),
+                            minimumMinor = digitsToMinor(minimum),
+                        )
+                    )
+                }
+            },
+            emphasis = valid,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Recording a payment: money leaves an account and the balance owed drops by the same amount. */
+@Composable
+private fun PayDebtSheet(
+    state: LedgerState,
+    debt: Debt,
+    onDismiss: () -> Unit,
+    onPay: (String, Long) -> Unit,
+) {
+    var digits by remember { mutableStateOf(minorToDigits(debt.minimumMinor)) }
+    var fromId by remember { mutableStateOf(state.accounts.firstOrNull()?.id.orEmpty()) }
+    val amount = digitsToMinor(digits)
+    val valid = amount > 0L && fromId.isNotEmpty()
+
+    MoneySheet(title = "Pay ${debt.name}", onDismiss = onDismiss) {
+        AmountInput(digits, { digits = it }, label = "How much")
+
+        Text(
+            "Out of",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ChipRow {
+            state.accounts.forEach { account ->
+                Chip(
+                    account.name,
+                    selected = fromId == account.id,
+                    leading = accountIcon(account.kind),
+                    onClick = { fromId = account.id },
+                )
+            }
+        }
+
+        Text(
+            "Logged as savings, not spending: clearing debt raises what you are worth rather than " +
+                "consuming it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Pill(
+            if (!valid) "Enter an amount" else "Pay ${money(amount)}",
+            Icons.Rounded.Check,
+            { if (valid) onPay(fromId, amount) },
+            emphasis = valid,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -636,7 +1296,7 @@ fun DebtScreen(state: LedgerState, onBack: () -> Unit) {
  * post to the ledger on their own: every path ends at a filled-in form the user confirms.
  */
 @Composable
-fun CaptureScreen(onBack: () -> Unit) {
+fun CaptureScreen(onBack: () -> Unit, onGo: (String) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
 
@@ -659,8 +1319,9 @@ fun CaptureScreen(onBack: () -> Unit) {
                 "Scan a receipt",
                 "Photograph it. The merchant, date and total are read off the image on this " +
                     "device, then dropped into a new transaction for you to check.",
-                "Needs the camera",
+                "Reads the photo on this device. Nothing is uploaded.",
                 "Open the camera",
+                onAction = { onGo(Routes.SCAN) },
             )
         }
         item {
@@ -682,6 +1343,7 @@ fun CaptureScreen(onBack: () -> Unit) {
                     "line merge instead of counting twice.",
                 "Needs nothing at all. Parsed on this device.",
                 "Choose a file",
+                onAction = { onGo(Routes.IMPORT) },
             )
         }
 
@@ -727,6 +1389,7 @@ private fun CaptureCard(
     body: String,
     permission: String,
     action: String,
+    onAction: (() -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Plate(Modifier.padding(top = 12.dp)) {
@@ -746,7 +1409,11 @@ private fun CaptureCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant.copy(alpha = 0.85f),
             )
-            Pill(action, Icons.Rounded.Check, {}, emphasis = true)
+            Pill(
+                action, Icons.Rounded.Check, onAction ?: {},
+                emphasis = onAction != null,
+                contentColor = if (onAction == null) MaterialTheme.colorScheme.onSurfaceVariant else null,
+            )
         }
     }
 }
@@ -847,6 +1514,16 @@ fun RewardsScreen(state: LedgerState, onBack: () -> Unit) {
         }
 
         item { SectionHeading("Challenges") }
+        if (state.challenges.isEmpty()) {
+            item {
+                EmptyWater(
+                    "No run going",
+                    "Challenges are read off the ledger rather than joined: set a budget and " +
+                        "spend under its daily pace, or get to a Saturday without spending, and " +
+                        "one appears here on its own.",
+                )
+            }
+        }
         items(state.challenges.size) { index ->
             val challenge = state.challenges[index]
             Plate(Modifier.padding(bottom = 10.dp)) {

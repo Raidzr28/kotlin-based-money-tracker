@@ -63,5 +63,15 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.work)
+
+    // On-device text recognition. No key, no per-call fee, no image leaves the phone.
+    implementation(libs.mlkit.text)
+    implementation(libs.androidx.glance)
+
+    testImplementation(libs.junit)
+    // Androids org.json is a stub on the JVM; unit tests need a real one.
+    testImplementation(libs.json.jvm)
     debugImplementation(libs.androidx.ui.tooling)
 }

@@ -101,6 +101,9 @@ interface TxnDao {
         if (tags.isNotEmpty()) insertTags(tags)
     }
 
+    @Query("SELECT transferPairId FROM transactions WHERE id = :id")
+    suspend fun pairIdOf(id: String): String?
+
     @Query("SELECT COUNT(*) FROM transactions")
     suspend fun count(): Int
 
@@ -165,6 +168,12 @@ interface BillDao {
     @Upsert
     suspend fun upsert(bill: BillEntity)
 
+    @Query("SELECT * FROM bills WHERE archived = 0 AND dueEpochDay BETWEEN :from AND :to ORDER BY dueEpochDay")
+    suspend fun dueBetween(from: Long, to: Long): List<BillEntity>
+
+    @Query("SELECT * FROM bills WHERE id = :id")
+    suspend fun byId(id: String): BillEntity?
+
     @Query("DELETE FROM bills WHERE id = :id")
     suspend fun deleteById(id: String)
 }
@@ -173,6 +182,9 @@ interface BillDao {
 interface GoalDao {
     @Query("SELECT * FROM goals ORDER BY sortOrder, name")
     fun observeAll(): Flow<List<GoalEntity>>
+
+    @Query("SELECT * FROM goals WHERE id = :id")
+    suspend fun byId(id: String): GoalEntity?
 
     @Upsert
     suspend fun upsert(goal: GoalEntity)
@@ -185,6 +197,9 @@ interface GoalDao {
 interface DebtDao {
     @Query("SELECT * FROM debts ORDER BY name")
     fun observeAll(): Flow<List<DebtEntity>>
+
+    @Query("SELECT * FROM debts WHERE id = :id")
+    suspend fun byId(id: String): DebtEntity?
 
     @Upsert
     suspend fun upsert(debt: DebtEntity)

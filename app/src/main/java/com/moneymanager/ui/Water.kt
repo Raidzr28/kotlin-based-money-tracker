@@ -231,9 +231,9 @@ fun Modifier.glassPlate(
             drawPath(
                 path = Path().apply {
                     moveTo(0f, r)
-                    quadraticBezierTo(0f, 0f, r, 0f)
+                    quadraticTo(0f, 0f, r, 0f)
                     lineTo(size.width - r, 0f)
-                    quadraticBezierTo(size.width, 0f, size.width, r)
+                    quadraticTo(size.width, 0f, size.width, r)
                 },
                 brush = Brush.horizontalGradient(
                     0f to Color.Transparent,
@@ -379,6 +379,51 @@ fun SubmergedPhoto(
             drawSwell(settled, phase, body, line, tint = 0.62f)
         }
     }
+}
+
+/**
+ * Work happening, for the moments where the app cannot say how long it will take.
+ *
+ * A bar with no motion reads as frozen, and reading a receipt or fetching a rate takes long
+ * enough to matter. This is the one looping animation in the app and it is allowed to be one:
+ * an indeterminate indicator is a progress indicator, not a gesture, which is also why it is the
+ * only place [LinearEasing] is correct -- an eased sweep would appear to stall at each end.
+ *
+ * It exists only while something is genuinely in flight. Callers remove it, not hide it.
+ */
+@Composable
+fun WaterPulse(modifier: Modifier = Modifier, height: Dp = 4.dp) {
+    val scheme = MaterialTheme.colorScheme
+    val moving = motionEnabled()
+    val sweep by rememberDrift(moving, durationMillis = 1_200)
+    val shape = RoundedCornerShape(percent = 50)
+
+    Box(
+        modifier
+            .height(height)
+            .clip(shape)
+            .background(scheme.surfaceContainerLowest, shape)
+            .drawBehind {
+                // With animations off the bar simply sits filled: still honest about something
+                // being in progress, without moving.
+                val width = if (!moving) size.width else size.width * 0.35f
+                val travel = if (!moving) 0f else (size.width + width) * sweep - width
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            scheme.primary.copy(alpha = 0f),
+                            scheme.primary,
+                            scheme.primary.copy(alpha = 0f),
+                        ),
+                        startX = travel,
+                        endX = travel + width,
+                    ),
+                    topLeft = Offset(travel, 0f),
+                    size = Size(width, size.height),
+                    cornerRadius = CornerRadius(size.height / 2f),
+                )
+            }
+    )
 }
 
 /**

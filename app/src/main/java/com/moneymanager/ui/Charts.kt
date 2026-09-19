@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.money
 import kotlin.math.PI
@@ -161,6 +162,7 @@ fun RingChart(
                 style = MaterialTheme.typography.labelSmall,
                 color = onArcInk(slice.color),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .offset(dx.dp, dy.dp)
                     .graphicsLayer { rotationZ = mid + 90f + flip },

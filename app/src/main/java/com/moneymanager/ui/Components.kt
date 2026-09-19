@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
@@ -154,6 +156,7 @@ fun SectionHeading(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
+                    .minimumInteractiveComponentSize()
                     .clip(RoundedCornerShape(50))
                     .clickable(onClick = onAction)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -196,6 +199,7 @@ fun Monogram(
                 style = MoneyType.small.copy(fontSize = (size.value * 0.31f).sp),
                 color = tint,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (badge != null) {
@@ -284,6 +288,7 @@ fun LedgerRow(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -294,6 +299,7 @@ fun LedgerRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 if (states.isNotEmpty()) {
                     Text(
@@ -301,6 +307,7 @@ fun LedgerRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -333,17 +340,19 @@ fun Pill(
     emphasis: Boolean = false,
     container: Color? = null,
     contentColor: Color? = null,
+    enabled: Boolean = true,
 ) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     val bg = container ?: if (emphasis) scheme.primary else water.glass
-    val fg = contentColor ?: if (emphasis) scheme.onPrimary else scheme.onSurface
+    val fg = (contentColor ?: if (emphasis) scheme.onPrimary else scheme.onSurface)
+        .copy(alpha = if (enabled) 1f else 0.38f)
     Row(
         modifier
             .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(50))
-            .background(bg)
-            .clickable(onClick = onClick)
+            .background(if (enabled) bg else bg.copy(alpha = 0.35f))
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -386,6 +395,7 @@ fun Chip(
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier
+            .then(if (onClick != null) Modifier.minimumInteractiveComponentSize() else Modifier)
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(50))
             .background(if (selected) scheme.primaryContainer else scheme.surfaceContainerLow)

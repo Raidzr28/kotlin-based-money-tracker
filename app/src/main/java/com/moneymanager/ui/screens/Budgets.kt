@@ -34,6 +34,7 @@ import com.moneymanager.data.monthPace
 import com.moneymanager.ui.icon
 import com.moneymanager.ui.Chip
 import com.moneymanager.ui.EmptyWater
+import com.moneymanager.ui.Pill
 import com.moneymanager.ui.ChipRow
 import com.moneymanager.ui.ColumnPair
 import com.moneymanager.ui.Flag
@@ -68,9 +69,25 @@ private val NEEDS = setOf("home", "groceries", "utilities", "health", "transport
 private val WANTS = setOf("food", "fun", "subs", "pets", "travel")
 
 @Composable
-fun BudgetsScreen(state: LedgerState, onOpenBudget: (String) -> Unit) {
+fun BudgetsScreen(
+    state: LedgerState,
+    onOpenBudget: (String) -> Unit,
+    onSetBudget: (categoryId: String, limitMinor: Long, rollsOver: Boolean) -> Unit,
+    onClearBudget: (String) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     var method by remember { mutableStateOf(Method.Envelopes) }
+    var editing by remember { mutableStateOf<String?>(null) }
+
+    editing?.let { categoryId ->
+        BudgetSheet(
+            state = state,
+            initialCategoryId = categoryId,
+            onDismiss = { editing = null },
+            onSave = { id, limit, rolls -> onSetBudget(id, limit, rolls); editing = null },
+            onClear = { id -> onClearBudget(id); editing = null },
+        )
+    }
 
     TabColumn {
         item {
@@ -87,6 +104,22 @@ fun BudgetsScreen(state: LedgerState, onOpenBudget: (String) -> Unit) {
                 Method.entries.forEach { option ->
                     Chip(option.label, selected = method == option, onClick = { method = option })
                 }
+            }
+        }
+
+        item {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Pill(
+                    if (state.budgets.isEmpty()) "Set your first budget" else "Set a budget",
+                    Icons.Rounded.Tune,
+                    { editing = state.categories.firstOrNull()?.id.orEmpty() },
+                    emphasis = state.budgets.isEmpty(),
+                )
             }
         }
 
@@ -128,7 +161,7 @@ fun BudgetsScreen(state: LedgerState, onOpenBudget: (String) -> Unit) {
         }
 
         when (method) {
-            Method.Envelopes -> envelopes(state, onOpenBudget)
+            Method.Envelopes -> envelopes(state, onOpenBudget) { editing = it }
             Method.Fifty -> fiftyThirtyTwenty(state)
             Method.Zero -> zeroBased(state)
         }
@@ -140,6 +173,7 @@ fun BudgetsScreen(state: LedgerState, onOpenBudget: (String) -> Unit) {
 private fun androidx.compose.foundation.lazy.LazyListScope.envelopes(
     state: LedgerState,
     onOpenBudget: (String) -> Unit,
+    onEdit: (String) -> Unit,
 ) {
     item {
         SectionHeading(
@@ -147,9 +181,90 @@ private fun androidx.compose.foundation.lazy.LazyListScope.envelopes(
             caption = "$daysLeft days left · the tick on each bar is today's pace",
         )
     }
+    if (state.budgets.isEmpty()) {
+        item {
+            EmptyWater(
+                "No envelopes yet",
+                "Give a category a monthly limit and it starts showing up here, on Home, and in " +
+                    "every report.",
+                actionLabel = "Set a budget",
+                actionIcon = Icons.Rounded.Tune,
+                onAction = { onEdit(state.categories.firstOrNull()?.id.orEmpty()) },
+            )
+        }
+    }
     items(state.budgets.size) { index ->
         val budget = state.budgets[index]
-        EnvelopePlate(budget, index, onClick = { onOpenBudget(budget.categoryId) })
+        EnvelopePlate(budget, index, onClick = { onEdit(budget.categoryId) })
+    }
+}
+
+/**
+ * Pick a category, give it a limit. The whole of budgeting in this app starts here, which is why
+ * it is a sheet and not a pushed screen: the user already decided before they tapped.
+ */
+@Composable
+private fun BudgetSheet(
+    state: LedgerState,
+    initialCategoryId: String,
+    onDismiss: () -> Unit,
+    onSave: (String, Long, Boolean) -> Unit,
+    onClear: (String) -> Unit,
+) {
+    var categoryId by remember { mutableStateOf(initialCategoryId) }
+    val existing = state.budgets.firstOrNull { it.categoryId == categoryId }
+    var digits by remember(categoryId) { mutableStateOf(minorToDigits(existing?.limitMinor ?: 0L)) }
+    var rolls by remember(categoryId) { mutableStateOf(existing?.rollsOver ?: false) }
+    val limit = digitsToMinor(digits)
+
+    MoneySheet(
+        title = if (existing == null) "Set a budget" else "Budget for ${Categories[categoryId].label}",
+        onDismiss = onDismiss,
+    ) {
+        ChipRow {
+            state.categories.forEach { category ->
+                Chip(
+                    category.label,
+                    selected = categoryId == category.id,
+                    leading = category.icon,
+                    onClick = { categoryId = category.id },
+                )
+            }
+        }
+
+        AmountInput(digits, { digits = it }, label = "Monthly limit")
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 16.dp)) {
+                Text(
+                    "Roll unspent over",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    "Anything left at the end of the month is added to next month's limit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = rolls, onCheckedChange = { rolls = it })
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Pill(
+                if (limit == 0L) "Enter a limit" else "Save ${money(limit)}",
+                Icons.Rounded.Check,
+                { if (limit > 0L) onSave(categoryId, limit, rolls) },
+                emphasis = limit > 0L,
+                modifier = Modifier.weight(1f),
+            )
+            if (existing != null) {
+                Pill(
+                    "Remove", Icons.Rounded.Bolt, { onClear(categoryId) },
+                    contentColor = MoneyTheme.water.alert,
+                )
+            }
+        }
     }
 }
 
@@ -344,12 +459,24 @@ fun BudgetDetailScreen(
     categoryId: String,
     onBack: () -> Unit,
     onOpenTxn: (String) -> Unit,
+    onSetBudget: (categoryId: String, limitMinor: Long, rollsOver: Boolean) -> Unit,
+    onClearBudget: (String) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     val category = Categories[categoryId]
     val budget = state.budgets.firstOrNull { it.categoryId == categoryId }
-    var rollover by remember(budget) { mutableStateOf(budget?.rollsOver ?: false) }
+    var editing by remember { mutableStateOf(false) }
+
+    if (editing) {
+        BudgetSheet(
+            state = state,
+            initialCategoryId = categoryId,
+            onDismiss = { editing = false },
+            onSave = { id, limit, rolls -> onSetBudget(id, limit, rolls); editing = false },
+            onClear = { id -> onClearBudget(id); editing = false },
+        )
+    }
 
     val rows = state.transactions.filter {
         it.categoryId == categoryId || it.splits.any { s -> s.categoryId == categoryId }
@@ -363,7 +490,7 @@ fun BudgetDetailScreen(
                     "Set one and this category joins the waterline on Home.",
                     actionLabel = "Set a budget",
                     actionIcon = Icons.Rounded.Tune,
-                    onAction = {},
+                    onAction = { editing = true },
                 )
             }
             return@DetailScaffold
@@ -439,7 +566,10 @@ fun BudgetDetailScreen(
                                 color = scheme.onSurfaceVariant,
                             )
                         }
-                        Switch(checked = rollover, onCheckedChange = { rollover = it })
+                        Switch(
+                            checked = budget.rollsOver,
+                            onCheckedChange = { onSetBudget(categoryId, budget.limitMinor, it) },
+                        )
                     }
                 }
             }

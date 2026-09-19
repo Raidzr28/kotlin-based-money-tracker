@@ -1,9 +1,10 @@
 package com.moneymanager
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import com.moneymanager.ui.MoneyManagerTheme
 import com.moneymanager.ui.MoneyManagerApp
 
@@ -28,10 +29,20 @@ import com.moneymanager.ui.MoneyManagerApp
  *   the verdict, DESIGN.md, and every shipping raster carrying its provenance.
  */
 
-class MainActivity : ComponentActivity() {
+/**
+ * A [FragmentActivity] rather than a plain ComponentActivity, because [androidx.biometric
+ * .BiometricPrompt] hosts itself in a fragment and will not attach to anything less.
+ */
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Blanks the thumbnail Android takes for the app switcher, and blocks screenshots while
+        // it is set. Read once at start: toggling it mid-session would need the window recreated.
+        if ((application as MoneyApp).security.hideInRecents) {
+            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        }
         setContent {
             MoneyManagerTheme {
                 MoneyManagerApp()

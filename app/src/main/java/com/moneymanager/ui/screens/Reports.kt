@@ -12,8 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,8 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.LedgerState
+import com.moneymanager.data.ledgerCsv
 import com.moneymanager.data.money
 import com.moneymanager.data.thisMonth
 import com.moneymanager.ui.icon
@@ -40,6 +43,7 @@ import com.moneymanager.ui.MoneyType
 import com.moneymanager.ui.Pill
 import com.moneymanager.ui.Plate
 import com.moneymanager.ui.RingChart
+import com.moneymanager.ui.LocalConfirm
 import com.moneymanager.ui.Routes
 import com.moneymanager.ui.SectionHeading
 import com.moneymanager.ui.Slice
@@ -61,6 +65,25 @@ private enum class Period(val label: String) { Month("This month"), Quarter("Qua
 @Composable
 fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val confirm = LocalConfirm.current
+    // The system picker owns the destination. No storage permission is requested, nothing is
+    // written until a folder is chosen, and the file lands somewhere the user already trusts.
+    val exportCsv = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val rows = state.allTransactions
+        val written = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(ledgerCsv(rows).toByteArray())
+            } ?: error("no stream")
+        }
+        confirm(
+            if (written.isSuccess) "Exported ${rows.size} transactions"
+            else "Could not write that file. Try another folder."
+        )
+    }
     val water = MoneyTheme.water
     var period by remember { mutableStateOf(Period.Month) }
 
@@ -266,13 +289,23 @@ fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
         item { SectionHeading("Export") }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Pill("Export CSV", Icons.Rounded.Download, {})
-                Pill("Export PDF", Icons.Rounded.Description, {})
+                Pill(
+                    "Export CSV",
+                    Icons.Rounded.Download,
+                    { exportCsv.launch("money-manager-${thisMonth.year}-%02d.csv".format(thisMonth.monthValue)) },
+                    emphasis = true,
+                    enabled = state.allTransactions.isNotEmpty(),
+                )
             }
         }
         item {
             Text(
-                "Exports are written to the folder you choose. Nothing is sent anywhere.",
+                if (state.allTransactions.isEmpty()) {
+                    "There is nothing to export yet."
+                } else {
+                    "Written to the folder you choose, in the same column layout this app " +
+                        "imports. Nothing is sent anywhere."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp),

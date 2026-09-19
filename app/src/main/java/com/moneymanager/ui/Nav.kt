@@ -21,7 +21,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.MoreHoriz
-import androidx.compose.material.icons.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
@@ -35,19 +35,27 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -58,7 +66,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.moneymanager.MoneyApp
 import com.moneymanager.MoneyViewModel
+import com.moneymanager.data.AppPrefs
 import com.moneymanager.data.LedgerState
+import com.moneymanager.data.money
+import com.moneymanager.data.RatesStore
+import com.moneymanager.data.SecurityStore
 import com.moneymanager.ui.screens.AccountDetailScreen
 import com.moneymanager.ui.screens.AccountsScreen
 import com.moneymanager.ui.screens.BillsScreen
@@ -69,10 +81,12 @@ import com.moneymanager.ui.screens.CurrencyScreen
 import com.moneymanager.ui.screens.DebtScreen
 import com.moneymanager.ui.screens.GoalsScreen
 import com.moneymanager.ui.screens.HomeScreen
+import com.moneymanager.ui.screens.ImportScreen
 import com.moneymanager.ui.screens.LedgerScreen
 import com.moneymanager.ui.screens.LockScreen
 import com.moneymanager.ui.screens.MoreScreen
 import com.moneymanager.ui.screens.ReportsScreen
+import com.moneymanager.ui.screens.ScanScreen
 import com.moneymanager.ui.screens.RewardsScreen
 import com.moneymanager.ui.screens.SecurityScreen
 import com.moneymanager.ui.screens.SettingsScreen
@@ -101,6 +115,7 @@ object Routes {
 
     const val TXN_NEW = "txn/new"
     const val TXN_DETAIL = "txn/{id}"
+    const val TXN_EDIT = "txn/{id}/edit"
     const val BUDGET_DETAIL = "budget/{id}"
     const val ACCOUNTS = "accounts"
     const val ACCOUNT_DETAIL = "account/{id}"
@@ -108,6 +123,8 @@ object Routes {
     const val GOALS = "goals"
     const val DEBT = "debt"
     const val CAPTURE = "capture"
+    const val IMPORT = "import"
+    const val SCAN = "scan"
     const val REWARDS = "rewards"
     const val CURRENCY = "currency"
     const val SECURITY = "security"
@@ -115,6 +132,7 @@ object Routes {
     const val SETTINGS = "settings"
 
     fun txn(id: String) = "txn/$id"
+    fun txnEdit(id: String) = "txn/$id/edit"
     fun budget(id: String) = "budget/$id"
     fun account(id: String) = "account/$id"
 }
@@ -128,11 +146,21 @@ object Routes {
  */
 val LocalConfirm = staticCompositionLocalOf<(String) -> Unit> { {} }
 
+/**
+ * Confirming an action that can still be taken back.
+ *
+ * Deleting a transaction used to be one tap with nothing behind it. A dialog asking "are you
+ * sure" before every delete trains people to tap through it; a snackbar that undoes the delete
+ * costs one tap only when the delete was a mistake. Kept separate from [LocalConfirm] so a
+ * screen has to mean it: passing an undo is a promise the action is reversible.
+ */
+val LocalUndo = staticCompositionLocalOf<(String, () -> Unit) -> Unit> { { _, _ -> } }
+
 data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 val tabs = listOf(
     Tab(Routes.HOME, "Home", Icons.Rounded.Home),
-    Tab(Routes.LEDGER, "Ledger", Icons.Rounded.ReceiptLong),
+    Tab(Routes.LEDGER, "Ledger", Icons.AutoMirrored.Rounded.ReceiptLong),
     Tab(Routes.BUDGETS, "Budgets", Icons.Rounded.Savings),
     Tab(Routes.REPORTS, "Reports", Icons.Rounded.Insights),
     Tab(Routes.MORE, "More", Icons.Rounded.MoreHoriz),
@@ -141,18 +169,49 @@ val tabs = listOf(
 @Composable
 fun MoneyManagerApp() {
     val app = LocalContext.current.applicationContext as MoneyApp
-    val vm: MoneyViewModel = viewModel(factory = MoneyViewModel.Factory(app.repository))
+    val vm: MoneyViewModel = viewModel(factory = MoneyViewModel.Factory(app.repository, app))
     val state by vm.state.collectAsState()
+    val security = app.security
+    val prefs = app.prefs
+    val rates = app.rates
     val nav = rememberNavController()
+
+    // The gate, not a destination. A lock that lives in the back stack can be navigated around;
+    // this one wraps everything and nothing renders behind it.
+    var locked by rememberSaveable { mutableStateOf(security.lockEnabled) }
+
+    // Re-lock whenever the app leaves the foreground, which is what "auto-lock: immediately"
+    // actually means. ON_STOP rather than ON_PAUSE, so a permission dialog does not lock you out
+    // of the screen that raised it.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, security) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && security.lockEnabled) locked = true
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val onTab = tabs.any { it.route == route }
-    val locked = route == Routes.LOCK
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val confirm: (String) -> Unit = remember(snackbar, scope) {
         { message ->
             scope.launch { snackbar.showSnackbar(message, withDismissAction = true) }
+            Unit
+        }
+    }
+    val undoable: (String, () -> Unit) -> Unit = remember(snackbar, scope) {
+        { message, undo ->
+            scope.launch {
+                // Only one of these can be on screen at a time, so an undo that arrives while an
+                // older one is still showing replaces it rather than queueing behind it.
+                snackbar.currentSnackbarData?.dismiss()
+                if (snackbar.showSnackbar(message, actionLabel = "Undo") == SnackbarResult.ActionPerformed) {
+                    undo()
+                }
+            }
             Unit
         }
     }
@@ -164,7 +223,12 @@ fun MoneyManagerApp() {
         // the hero.
         WaterField(animate = route == Routes.HOME || locked)
 
-        CompositionLocalProvider(LocalConfirm provides confirm) {
+        if (locked) {
+            LockScreen(security = security, onUnlock = { locked = false })
+            return@BoxWithConstraints
+        }
+
+        CompositionLocalProvider(LocalConfirm provides confirm, LocalUndo provides undoable) {
             Row(Modifier.fillMaxSize()) {
                 if (wide && onTab) MoneyRail(nav, route)
                 Scaffold(
@@ -189,6 +253,10 @@ fun MoneyManagerApp() {
                         nav = nav,
                         vm = vm,
                         state = state,
+                        security = security,
+                        prefs = prefs,
+                        rates = rates,
+                        onLockNow = { locked = true },
                         modifier = Modifier
                             .padding(inner)
                             .consumeWindowInsets(inner),
@@ -279,6 +347,10 @@ private fun MoneyNavHost(
     nav: NavHostController,
     vm: MoneyViewModel,
     state: LedgerState,
+    security: SecurityStore,
+    prefs: AppPrefs,
+    rates: RatesStore,
+    onLockNow: () -> Unit,
     modifier: Modifier,
 ) {
     val moving = motionEnabled()
@@ -286,6 +358,7 @@ private fun MoneyNavHost(
     val enterSpec = tween<Float>(MoneyMotion.Enter, easing = MoneyMotion.EnterEasing)
     val exitSpec = tween<Float>(MoneyMotion.Exit, easing = MoneyMotion.ExitEasing)
 
+    val confirm = LocalConfirm.current
     NavHost(
         navController = nav,
         startDestination = Routes.HOME,
@@ -308,9 +381,6 @@ private fun MoneyNavHost(
             ) { it / 5 } + fadeOut(exitSpec)
         },
     ) {
-        composable(Routes.LOCK) {
-            LockScreen(onUnlock = { nav.navigate(Routes.HOME) { popUpTo(Routes.LOCK) { inclusive = true } } })
-        }
         composable(Routes.HOME) {
             HomeScreen(
                 state = state,
@@ -323,17 +393,51 @@ private fun MoneyNavHost(
             LedgerScreen(state, onOpenTxn = { nav.navigate(Routes.txn(it)) }, onGo = nav::navigate)
         }
         composable(Routes.BUDGETS) {
-            BudgetsScreen(state, onOpenBudget = { nav.navigate(Routes.budget(it)) })
+            BudgetsScreen(
+                state = state,
+                onOpenBudget = { nav.navigate(Routes.budget(it)) },
+                onSetBudget = vm::setBudget,
+                onClearBudget = vm::clearBudget,
+            )
         }
         composable(Routes.REPORTS) { ReportsScreen(state, onGo = nav::navigate) }
         composable(Routes.MORE) { MoreScreen(state, onGo = nav::navigate) }
 
         composable(Routes.TXN_NEW) {
+            val pending by vm.pendingScan.collectAsState()
             TransactionEditorScreen(
                 state = state,
+                rates = rates,
+                prefill = pending,
+                onPrefillUsed = vm::consumeScan,
                 onBack = nav::popBackStack,
-                onSave = { merchant, categoryId, accountId, amountMinor, flow, note ->
-                    vm.logTransaction(merchant, categoryId, accountId, amountMinor, flow, note)
+                onGo = nav::navigate,
+                onSave = { id, merchant, categoryId, accountId, amountMinor, flow, note, foreign ->
+                    vm.logTransaction(
+                        id = id, merchant = merchant, categoryId = categoryId,
+                        accountId = accountId, amountMinor = amountMinor, flow = flow,
+                        note = note, foreign = foreign,
+                    )
+                },
+            )
+        }
+        composable(
+            Routes.TXN_EDIT,
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+        ) { entry ->
+            val editingId = entry.arguments?.getString("id").orEmpty()
+            TransactionEditorScreen(
+                state = state,
+                rates = rates,
+                editing = state.allTransactions.firstOrNull { it.id == editingId },
+                onBack = nav::popBackStack,
+                onGo = nav::navigate,
+                onSave = { id, merchant, categoryId, accountId, amountMinor, flow, note, foreign ->
+                    vm.logTransaction(
+                        id = id, merchant = merchant, categoryId = categoryId,
+                        accountId = accountId, amountMinor = amountMinor, flow = flow,
+                        note = note, foreign = foreign,
+                    )
                 },
             )
         }
@@ -341,11 +445,47 @@ private fun MoneyNavHost(
             Routes.TXN_DETAIL,
             arguments = listOf(navArgument("id") { type = NavType.StringType }),
         ) { entry ->
+            val undo = LocalUndo.current
             TransactionDetailScreen(
                 state = state,
                 id = entry.arguments?.getString("id").orEmpty(),
                 onBack = nav::popBackStack,
-                onDelete = vm::deleteTransaction,
+                onEdit = { nav.navigate(Routes.txnEdit(it)) },
+                onGo = nav::navigate,
+                onDelete = { txn ->
+                    vm.deleteTransaction(txn.id)
+                    // Restored under its own id, date and time, so undo puts the row back where
+                    // it was rather than logging a lookalike at the top of today.
+                    undo("Deleted ${txn.merchant}") {
+                        vm.logTransaction(
+                            id = txn.id,
+                            merchant = txn.merchant,
+                            categoryId = txn.categoryId,
+                            accountId = txn.accountId,
+                            amountMinor = txn.amountMinor,
+                            flow = txn.flow,
+                            note = txn.note,
+                            tags = txn.tags,
+                            splits = txn.splits,
+                            date = txn.date,
+                            time = txn.time,
+                        )
+                    }
+                },
+                onDuplicate = { txn ->
+                    // A copy is a new row dated now: the point of duplicating is the weekly shop
+                    // you just did again, not a second record of the old one.
+                    vm.logTransaction(
+                        merchant = txn.merchant,
+                        categoryId = txn.categoryId,
+                        accountId = txn.accountId,
+                        amountMinor = txn.amountMinor,
+                        flow = txn.flow,
+                        note = txn.note,
+                        tags = txn.tags,
+                    )
+                    confirm("Copied ${txn.merchant} to today")
+                },
             )
         }
         composable(
@@ -357,10 +497,20 @@ private fun MoneyNavHost(
                 categoryId = entry.arguments?.getString("id").orEmpty(),
                 onBack = nav::popBackStack,
                 onOpenTxn = { nav.navigate(Routes.txn(it)) },
+                onSetBudget = vm::setBudget,
+                onClearBudget = vm::clearBudget,
             )
         }
         composable(Routes.ACCOUNTS) {
-            AccountsScreen(state, onBack = nav::popBackStack, onOpenAccount = { nav.navigate(Routes.account(it)) })
+            AccountsScreen(
+                state = state,
+                onBack = nav::popBackStack,
+                onOpenAccount = { nav.navigate(Routes.account(it)) },
+                onSaveAccount = { name, kind, opening, limit ->
+                    vm.saveAccount(name, kind, opening, limit)
+                },
+                onTransfer = { from, to, amount -> vm.transfer(from, to, amount) },
+            )
         }
         composable(
             Routes.ACCOUNT_DETAIL,
@@ -373,13 +523,74 @@ private fun MoneyNavHost(
                 onOpenTxn = { nav.navigate(Routes.txn(it)) },
             )
         }
-        composable(Routes.BILLS) { BillsScreen(state, onBack = nav::popBackStack) }
-        composable(Routes.GOALS) { GoalsScreen(state, onBack = nav::popBackStack, onGo = nav::navigate) }
-        composable(Routes.DEBT) { DebtScreen(state, onBack = nav::popBackStack) }
-        composable(Routes.CAPTURE) { CaptureScreen(onBack = nav::popBackStack) }
+        composable(Routes.BILLS) {
+            BillsScreen(
+                state = state,
+                prefs = prefs,
+                onBack = nav::popBackStack,
+                onSaveBill = vm::saveBill,
+                onPayBill = { id ->
+                    val bill = state.bills.firstOrNull { it.id == id }
+                    vm.payBill(id)
+                    confirm(
+                        if (bill == null) "Marked paid"
+                        else "Logged ${money(bill.amountMinor)} for ${bill.name}"
+                    )
+                },
+            )
+        }
+        composable(Routes.GOALS) {
+            GoalsScreen(
+                state = state,
+                onBack = nav::popBackStack,
+                onGo = nav::navigate,
+                onSaveGoal = vm::saveGoal,
+                onContribute = vm::contributeToGoal,
+            )
+        }
+        composable(Routes.DEBT) {
+            DebtScreen(
+                state = state,
+                onBack = nav::popBackStack,
+                onSaveDebt = vm::saveDebt,
+                onPayDebt = vm::payDebt,
+            )
+        }
+        composable(Routes.CAPTURE) {
+            CaptureScreen(onBack = nav::popBackStack, onGo = nav::navigate)
+        }
+        composable(Routes.SCAN) {
+            ScanScreen(
+                onBack = nav::popBackStack,
+                onUse = { guess, _ ->
+                    vm.offerScan(guess)
+                    nav.popBackStack()
+                    nav.navigate(Routes.TXN_NEW)
+                },
+            )
+        }
+        composable(Routes.IMPORT) {
+            val confirm = LocalConfirm.current
+            ImportScreen(
+                state = state,
+                onBack = nav::popBackStack,
+                onImport = { candidates, accountId, categoryId ->
+                    vm.importStatement(candidates, accountId, categoryId) { n ->
+                        confirm("Imported $n transactions")
+                    }
+                    nav.popBackStack()
+                },
+            )
+        }
         composable(Routes.REWARDS) { RewardsScreen(state, onBack = nav::popBackStack) }
-        composable(Routes.CURRENCY) { CurrencyScreen(onBack = nav::popBackStack) }
-        composable(Routes.SECURITY) { SecurityScreen(onBack = nav::popBackStack, onPreviewLock = { nav.navigate(Routes.LOCK) }) }
+        composable(Routes.CURRENCY) { CurrencyScreen(rates, onBack = nav::popBackStack) }
+        composable(Routes.SECURITY) {
+            SecurityScreen(
+                security = security,
+                onBack = nav::popBackStack,
+                onLockNow = { nav.popBackStack(); onLockNow() },
+            )
+        }
         composable(Routes.SYNC) { SyncScreen(onBack = nav::popBackStack) }
         composable(Routes.SETTINGS) {
             SettingsScreen(

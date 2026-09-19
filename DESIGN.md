@@ -294,7 +294,9 @@ letters: first letters of the first two words, else the first two characters.
 
 ### Named Rules
 
-**The Real Money Rule.** Any figure standing for real currency is set in a `MoneyType` style — Archivo wide, tabular, never italic — and rendered through `MoneyText`. Counts, percentages and day numbers are not money and use the Material roles.
+**The Real Money Rule.** A figure that stands on its own — a balance, a total, a row's amount, anything the eye lands on or scans down a column — is set in a `MoneyType` style (Archivo wide, tabular, never italic) and rendered through `MoneyText`. Money inside a running sentence takes the sentence's style and uses `money()` directly: tabular figures exist to align a column, and there is no column inside a sentence. Counts, percentages and day numbers are not money and use the Material roles.
+
+**The widget is the one exception**, and not by choice: Glance has no access to the app's font, so the home-screen widget renders money in the system face. It keeps the palette and the hierarchy; it cannot keep the lettering.
 
 **The Cents Are Shown Rule.** Money is `Long` minor units formatted by `moneyParts`. Cents are always present and never emphasised: 64% of the base size at 52% alpha. Never `Double`, never rounded away.
 
@@ -340,10 +342,12 @@ Anything that is an action or a token — pill, chip, flag, section action, mark
 ### Buttons
 - **FAB (primary action):** filled Surf with `onPrimary` content. Extended with a "Log" label on Home, icon-only on Ledger. One FAB, bottom-end, and only where the primary action is real — screens whose add-flow does not exist ship no FAB rather than a decoration.
 - **Pill:** the button that sits on the water. Fully round, min 48dp, 16dp/12dp padding, 18dp leading glyph, `labelLarge`. Default fill is the glass film; `emphasis = true` swaps to a filled Surf container with `onPrimary` text.
-- **Section action:** a plain text button in Primary at `labelLarge`, round-clipped, 12dp/10dp padding. Never a chevron pretending to be a button.
+- **Section action:** a plain text button in Primary at `labelLarge`, round-clipped, 12dp/10dp padding, `minimumInteractiveComponentSize()` so the drawn pill stays small while the target reaches 48dp. Never a chevron pretending to be a button.
+- **Disabled:** content and container at 38% and the click removed (`Pill(enabled = false)`), with one line beneath saying what would make it available. A control that cannot act must not look like one that can.
 
 ### Chips
-- **Style:** fully round, min 36dp, 14dp/7dp padding, optional 15dp leading glyph, `labelLarge`.
+- **Style:** fully round, min 36dp drawn, 14dp/7dp padding, optional 15dp leading glyph, `labelLarge`. A tappable chip carries `minimumInteractiveComponentSize()`: the pill is 36dp, the target is 48dp.
+- **Label chips:** a `Chip` with no `onClick` is a statement, not a filter (the ledger's month). It takes no minimum target and no ripple, because there is nothing to hit.
 - **State:** unselected is `surfaceContainerLow` with `onSurfaceVariant` text; selected is `primaryContainer` with `onPrimaryContainer`. Selection is a **fill** change, never an outline-colour-only change.
 - **Rows** scroll horizontally at 8dp spacing.
 
@@ -405,6 +409,9 @@ that is not responding to a user action in that moment.
 - **Do** call `motionEnabled()` before any animation, and draw the ground once per shell with `animate` scoped to the screen that owns the hero.
 - **Do** keep the 20dp gutter, and use `Modifier.bleed()` when — and only when — an item is the screen's thesis.
 - **Do** leave Dynamic Color off by default and opt-in in Appearance; a wallpaper-derived scheme reorders the depth ladder until the waterline stops meaning anything.
+- **Do** give every `maxLines = 1` an `overflow = TextOverflow.Ellipsis`. Clipping mid-glyph says nothing was cut; the ellipsis says something was, and at large system text sizes far more strings run past.
+- **Do** confirm every committed write in the snackbar, and pass an undo (`LocalUndo`) whenever the write can honestly be reversed. Deleting a row restores under its own id, date and time, not as a copy at the top of today.
+- **Do** let the whole settings row toggle its switch, with `Role.Switch` on the row and `onCheckedChange = null` on the control, so a screen reader announces one thing.
 
 ### Don't:
 - **Don't** add a drop shadow, an outline, or a hand-tuned alpha to fake elevation.
@@ -418,3 +425,6 @@ that is not responding to a user action in that moment.
 - **Don't** put a circular add button inside the navigation bar, or ship a FAB on a screen whose add-flow does not exist.
 - **Don't** stack a kicker or eyebrow above a section heading.
 - **Don't** pull in a chart library; the charts are drawn so they belong to this water.
+- **Don't** ship a control wired to `{}`. Either it acts, or it is disabled with a reason, or it is not drawn. A button that absorbs a tap in silence is the one defect a user cannot diagnose.
+- **Don't** guard a live-looking button with an early `return` inside its `onClick`. The condition that would refuse the tap belongs in `enabled`.
+- **Don't** write a figure, a rate or a month into the source. Read it off the row or the clock; a hardcoded `€` and a hardcoded rate were both shipping on the transaction detail screen.
