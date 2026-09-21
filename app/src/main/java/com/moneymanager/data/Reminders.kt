@@ -23,6 +23,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
 
 /*
  * Bill reminders, entirely on the device.
@@ -155,5 +156,79 @@ private fun NotificationManagerCompat.notifySafely(
     } catch (_: SecurityException) {
         // The permission can be revoked between the check above and here. Losing a reminder is
         // the correct outcome; crashing in a background worker is not.
+    }
+}
+
+/**
+ * The evening streak check.
+ *
+ * Its own worker on its own schedule rather than a branch inside the bill check, because the two
+ * want opposite hours: a bill is useful in the morning, when there is still a working day to pay
+ * it in, and a streak warning is only useful late, once the day has nearly gone without a
+ * transaction. Independent switches too, so someone can keep one and turn the other off.
+ */
+private const val STREAK_WORK_NAME = "streak-warnings"
+
+/** Late enough that the day is nearly gone, early enough to still do something about it. */
+private const val STREAK_HOUR = 20
+
+fun scheduleStreakWarnings(context: Context, prefs: AppPrefs) {
+    val work = WorkManager.getInstance(context)
+    if (!prefs.streakWarnings) {
+        work.cancelUniqueWork(STREAK_WORK_NAME)
+        return
+    }
+    work.enqueueUniquePeriodicWork(
+        STREAK_WORK_NAME,
+        ExistingPeriodicWorkPolicy.UPDATE,
+        PeriodicWorkRequestBuilder<StreakWarningWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(millisUntilHour(STREAK_HOUR), TimeUnit.MILLISECONDS)
+            .build(),
+    )
+}
+
+/**
+ * Says something only when there is a real streak about to lapse and nothing logged today.
+ *
+ * The streak is counted back from yesterday out of the ledger itself, the same way the Progress
+ * screen derives it -- there is no stored streak counter to drift away from the transactions.
+ * Nothing is posted for a streak of zero or one: a notification telling you that you are about
+ * to lose nothing is how an app gets muted.
+ */
+class StreakWarningWorker(
+    context: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(context, params) {
+
+    override suspend fun doWork(): Result {
+        val prefs = AppPrefs(applicationContext)
+        if (!prefs.streakWarnings || !canNotify(applicationContext)) return Result.success()
+
+        val db = MoneyDatabase.get(applicationContext)
+        val today = LocalDate.now()
+        val days = db.txns()
+            .observeBetween(today.minusDays(400).toEpochDay(), today.toEpochDay())
+            .first()
+            .map { LocalDate.ofEpochDay(it.txn.epochDay) }
+            .toSet()
+
+        // Already logged today: nothing to warn about.
+        if (today in days) return Result.success()
+
+        var streak = 0
+        var day = today.minusDays(1)
+        while (day in days) {
+            streak++
+            day = day.minusDays(1)
+        }
+        if (streak < 2) return Result.success()
+
+        NotificationManagerCompat.from(applicationContext).notifySafely(
+            applicationContext,
+            id = STREAK_WORK_NAME.hashCode(),
+            title = "Your $streak-day streak ends at midnight",
+            body = "Log anything today to keep it going.",
+        )
+        return Result.success()
     }
 }

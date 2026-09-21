@@ -2,6 +2,7 @@ package com.moneymanager.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,11 +24,12 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Flag
-import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.MilitaryTech
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -44,6 +46,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -52,7 +55,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.moneymanager.R
 import com.moneymanager.data.LedgerState
+import com.moneymanager.data.SUPPORTED_CURRENCIES
 import com.moneymanager.data.Account
+import com.moneymanager.data.Asset
 import com.moneymanager.data.AppPrefs
 import com.moneymanager.data.Bill
 import com.moneymanager.data.Debt
@@ -62,11 +67,20 @@ import com.moneymanager.data.canNotify
 import com.moneymanager.data.scheduleReminders
 import com.moneymanager.data.dayOfMonth
 import com.moneymanager.data.daysInMonth
-import com.moneymanager.data.thisMonth
+import com.moneymanager.data.cycleDayOf
+import com.moneymanager.data.cycleEnd
+import com.moneymanager.data.cycleStart
+import com.moneymanager.data.weekColumnOf
 import com.moneymanager.data.AccountKind
 import com.moneymanager.data.Accounts
 import com.moneymanager.data.short
 import com.moneymanager.data.money
+import com.moneymanager.ui.motionEnabled
+import com.moneymanager.ui.kelpProgress
+import com.moneymanager.ui.KelpBed
+import com.moneymanager.data.dayLabel
+import com.moneymanager.data.roundUpsSince
+import com.moneymanager.data.ROUND_UP_STEPS
 import com.moneymanager.data.today
 import com.moneymanager.ui.icon
 import com.moneymanager.ui.accountIcon
@@ -109,19 +123,53 @@ fun AccountsScreen(
     state: LedgerState,
     onBack: () -> Unit,
     onOpenAccount: (String) -> Unit,
-    onSaveAccount: (name: String, kind: AccountKind, openingMinor: Long, limitMinor: Long?) -> Unit,
+    onSaveAccount: (
+        name: String,
+        kind: AccountKind,
+        openingMinor: Long,
+        limitMinor: Long?,
+        currency: String,
+    ) -> Unit,
     onTransfer: (fromId: String, toId: String, amountMinor: Long) -> Unit,
+    onSaveAsset: (Asset) -> Unit,
+    onDeleteAsset: (String) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
     var adding by remember { mutableStateOf(false) }
     var transferring by remember { mutableStateOf(false) }
+    var addingAsset by remember { mutableStateOf(false) }
+    var editingAsset by remember { mutableStateOf<Asset?>(null) }
+
+    if (addingAsset || editingAsset != null) {
+        AssetSheet(
+            existing = editingAsset,
+            accounts = state.accounts,
+            onDismiss = {
+                addingAsset = false
+                editingAsset = null
+            },
+            onSave = {
+                onSaveAsset(it)
+                addingAsset = false
+                editingAsset = null
+            },
+            onDelete = editingAsset?.let { a ->
+                {
+                    onDeleteAsset(a.id)
+                    editingAsset = null
+                }
+            },
+        )
+    }
 
     if (adding) {
         AccountSheet(
+            base = state.baseCurrency,
+            multiCurrency = state.conversion.enabled,
             onDismiss = { adding = false },
-            onSave = { name, kind, opening, limit ->
-                onSaveAccount(name, kind, opening, limit)
+            onSave = { name, kind, opening, limit, currency ->
+                onSaveAccount(name, kind, opening, limit, currency)
                 adding = false
             },
         )
@@ -144,6 +192,9 @@ fun AccountsScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(26.dp)) {
                         Stat("Across everything", owned - owed, style = MoneyType.large)
                         Stat("Spendable now", state.liquidMinor, style = MoneyType.medium)
+                        if (state.assets.isNotEmpty()) {
+                            Stat("Things you own", state.assetsMinor, style = MoneyType.medium)
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Pill("Add account", Icons.Rounded.Add, { adding = true }, emphasis = true)
@@ -168,16 +219,204 @@ fun AccountsScreen(
             }
         }
 
-        item { SectionHeading("Assets", caption = "Things you own, counted toward net worth") }
         item {
-            EmptyWater(
-                "No assets tracked yet",
-                "A motorbike, a laptop, a fridge. Record what it cost and when the warranty ends, " +
-                    "and it counts toward net worth instead of vanishing the day you bought it. " +
-                    "Not built yet.",
+            SectionHeading(
+                "Assets",
+                caption = "Things you own, counted toward net worth",
+                actionLabel = if (state.assets.isEmpty()) null else "Add",
+                onAction = if (state.assets.isEmpty()) null else ({ addingAsset = true }),
             )
         }
+        if (state.assets.isEmpty()) {
+            item {
+                EmptyWater(
+                    "No assets tracked yet",
+                    "A motorbike, a laptop, a fridge. Record what it cost and when the warranty " +
+                        "ends, and it counts toward net worth instead of vanishing the day you " +
+                        "bought it.",
+                    actionLabel = "Add an asset",
+                    actionIcon = Icons.Rounded.Add,
+                    onAction = { addingAsset = true },
+                )
+            }
+        } else {
+            item {
+                Plate {
+                    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                        state.assets.forEach { asset ->
+                            AssetRow(asset) { editingAsset = asset }
+                        }
+                    }
+                }
+            }
+        }
         item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+/**
+ * One possession: what it is worth now, and what it has cost you to own it so far.
+ *
+ * The depreciated figure is shown rather than hidden because it is the useful half of the fact.
+ * "Worth 900" alone invites the reader to think nothing happened; "900, 600 used up" is the
+ * sentence that explains where the money went.
+ */
+@Composable
+private fun AssetRow(asset: Asset, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val water = MoneyTheme.water
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Marker(Icons.Rounded.Inventory2, tint = scheme.onSurfaceVariant, size = 38.dp)
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(start = 12.dp)
+        ) {
+            Text(asset.name, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
+            Text(
+                buildString {
+                    append(money(asset.costMinor, asset.currency))
+                    append(" in ")
+                    append(asset.boughtOn.year)
+                    asset.depreciatedMinor?.let {
+                        append(" · ")
+                        append(money(it, asset.currency))
+                        append(" used up")
+                    }
+                    if (asset.underWarranty) append(" · under warranty")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (asset.underWarranty) water.goal else scheme.onSurfaceVariant,
+            )
+        }
+        MoneyText(
+            asset.valueMinor,
+            currency = asset.currency,
+            style = MoneyType.small,
+        )
+    }
+}
+
+/**
+ * Adding or editing a possession.
+ *
+ * Useful life is offered as a handful of plain choices rather than a number field, because the
+ * honest answer is a guess and a guess typed to the month reads more precise than it is. "Holds
+ * its value" is a first-class option, not the absence of one: plenty of things do.
+ */
+@Composable
+private fun AssetSheet(
+    existing: Asset?,
+    accounts: List<Account>,
+    onDismiss: () -> Unit,
+    onSave: (Asset) -> Unit,
+    onDelete: (() -> Unit)?,
+) {
+    var name by remember { mutableStateOf(existing?.name ?: "") }
+    var digits by remember { mutableStateOf(existing?.costMinor?.let { minorToDigits(it) } ?: "") }
+    var bought by remember { mutableStateOf(existing?.boughtOn ?: today) }
+    var life by remember { mutableStateOf(existing?.usefulLifeMonths) }
+    var warranty by remember { mutableStateOf(existing?.warrantyUntil) }
+    var accountId by remember { mutableStateOf(existing?.accountId) }
+
+    val cost = digitsToMinor(digits)
+    val valid = name.isNotBlank() && cost > 0L
+
+    val lifeChoices = listOf<Pair<Int?, String>>(
+        null to "Holds its value",
+        24 to "2 years",
+        36 to "3 years",
+        60 to "5 years",
+        120 to "10 years",
+    )
+
+    MoneySheet(
+        title = if (existing == null) "Add an asset" else existing.name,
+        onDismiss = onDismiss,
+    ) {
+        TextInput(name, { name = it }, label = "What it is", placeholder = "Motorbike, laptop, fridge ...")
+        AmountInput(
+            digits,
+            { digits = it },
+            label = "What it cost",
+            currency = Accounts.currencyOf(accountId),
+        )
+        DateField("Bought on", bought, onDate = { bought = it })
+
+        Text(
+            "Worth nothing after",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ChipRow {
+            lifeChoices.forEach { (months, label) ->
+                Chip(label, selected = life == months, onClick = { life = months })
+            }
+        }
+        if (life != null && cost > 0L) {
+            val preview = Asset("", name, cost, bought, life, null, accountId)
+            Text(
+                "Worth ${money(preview.valueMinor, Accounts.currencyOf(accountId))} today.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        ChipRow {
+            Chip("No warranty", selected = warranty == null, onClick = { warranty = null })
+            listOf(12, 24, 36).forEach { months ->
+                val until = bought.plusMonths(months.toLong())
+                Chip(
+                    "$months months",
+                    selected = warranty == until,
+                    onClick = { warranty = until },
+                )
+            }
+        }
+
+        if (accounts.isNotEmpty()) {
+            ChipRow {
+                Chip("No account", selected = accountId == null, onClick = { accountId = null })
+                accounts.forEach { account ->
+                    Chip(
+                        account.name,
+                        selected = accountId == account.id,
+                        onClick = { accountId = account.id },
+                    )
+                }
+            }
+        }
+
+        Pill(
+            if (!valid) "Name it and say what it cost" else "Save",
+            Icons.Rounded.Check,
+            {
+                if (valid) {
+                    onSave(
+                        Asset(
+                            id = existing?.id ?: "",
+                            name = name.trim(),
+                            costMinor = cost,
+                            boughtOn = bought,
+                            usefulLifeMonths = life,
+                            warrantyUntil = warranty,
+                            accountId = accountId,
+                        )
+                    )
+                }
+            },
+            emphasis = valid,
+        )
+        if (onDelete != null) {
+            Pill("Stop tracking this", Icons.Rounded.Delete, onDelete)
+        }
     }
 }
 
@@ -258,13 +497,16 @@ private fun TransferSheet(
  */
 @Composable
 private fun AccountSheet(
+    base: String,
+    multiCurrency: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, AccountKind, Long, Long?) -> Unit,
+    onSave: (String, AccountKind, Long, Long?, String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var kind by remember { mutableStateOf(AccountKind.Bank) }
     var opening by remember { mutableStateOf("") }
     var limit by remember { mutableStateOf("") }
+    var currency by remember(base) { mutableStateOf(base) }
 
     MoneySheet(title = "Add an account", onDismiss = onDismiss) {
         TextInput(name, { name = it }, label = "Name", placeholder = "Everyday, Cash, Visa ...")
@@ -280,9 +522,26 @@ private fun AccountSheet(
             }
         }
 
+        // Only asked when the user has said they hold more than one currency. Everyone else has
+        // one, it is the base, and a picker with a single sensible answer is a question not worth
+        // putting on a form.
+        if (multiCurrency) {
+            Text(
+                "Currency",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ChipRow {
+                SUPPORTED_CURRENCIES.forEach { code ->
+                    Chip(code, selected = currency == code, onClick = { currency = code })
+                }
+            }
+        }
+
         AmountInput(
             opening, { opening = it },
             label = if (kind == AccountKind.Card) "Currently owed" else "Balance right now",
+            currency = currency,
         )
 
         if (kind == AccountKind.Card) {
@@ -297,7 +556,7 @@ private fun AccountSheet(
                     // A card's balance is money owed, so it is stored negative and every screen
                     // reads the sign rather than special-casing the account kind.
                     val signed = if (kind == AccountKind.Card) -digitsToMinor(opening) else digitsToMinor(opening)
-                    onSave(name, kind, signed, digitsToMinor(limit).takeIf { it > 0 })
+                    onSave(name, kind, signed, digitsToMinor(limit).takeIf { it > 0 }, currency)
                 }
             },
             emphasis = name.isNotBlank(),
@@ -541,12 +800,14 @@ fun BillsScreen(
             item {
                 Plate {
                     DueCalendar(
+                        // Day numbers are positions in the cycle, not calendar dates, so a
+                        // month that opens on the 25th marks its bills in the right cells.
                         dueDays = state.bills
-                            .filter { java.time.YearMonth.from(it.due) == thisMonth }
-                            .map { it.due.dayOfMonth }
+                            .filter { it.due >= cycleStart && it.due <= cycleEnd }
+                            .map { cycleDayOf(it.due) }
                             .toSet(),
                         daysInMonth = daysInMonth,
-                        firstDayOffset = thisMonth.atDay(1).dayOfWeek.value - 1,
+                        firstDayOffset = weekColumnOf(cycleStart),
                         todayDay = dayOfMonth,
                     )
                 }
@@ -582,8 +843,8 @@ fun BillsScreen(
                                 ) {
                                     Text(bill.name, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
                                     Text(
-                                        "${money(bill.amountMinor)} a month · " +
-                                            "${money(bill.amountMinor * 12)} a year",
+                                        "${money(bill.amountMinor, bill.currency)} a month · " +
+                                            "${money(bill.amountMinor * 12, bill.currency)} a year",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = scheme.onSurfaceVariant,
                                     )
@@ -814,6 +1075,7 @@ fun GoalsScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             MoneyText(
                                 goal.savedMinor,
+                                currency = goal.currency,
                                 style = MoneyType.medium,
                                 color = scheme.onSurface,
                                 modifier = Modifier.weight(1f),
@@ -870,7 +1132,7 @@ fun GoalsScreen(
                         ) {
                             Text(goal.name, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
                             Text(
-                                "${money(goal.savedMinor)} of ${money(goal.targetMinor)}",
+                                "${money(goal.savedMinor, goal.currency)} of ${money(goal.targetMinor, goal.currency)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = scheme.onSurfaceVariant,
                             )
@@ -1058,16 +1320,16 @@ fun DebtScreen(
                                 Text(debt.name, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
                                 Text(
                                     if (debt.aprBasisPoints == 0) {
-                                        "No interest · ${money(debt.minimumMinor)} a month"
+                                        "No interest · ${money(debt.minimumMinor, debt.currency)} a month"
                                     } else {
                                         "${debt.aprBasisPoints / 100.0}% APR · " +
-                                            "${money(debt.minimumMinor)} a month"
+                                            "${money(debt.minimumMinor, debt.currency)} a month"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = scheme.onSurfaceVariant,
                                 )
                             }
-                            MoneyText(debt.balanceMinor, style = MoneyType.row, color = scheme.onSurface)
+                            MoneyText(debt.balanceMinor, currency = debt.currency, style = MoneyType.row, color = scheme.onSurface)
                             Pill(
                                 "Pay", Icons.Rounded.Check, { payingOff = debt },
                                 modifier = Modifier.padding(start = 10.dp),
@@ -1338,7 +1600,7 @@ fun CaptureScreen(onBack: () -> Unit, onGo: (String) -> Unit) {
             CaptureCard(
                 Icons.Rounded.Description,
                 "Import a statement",
-                "Export CSV, XLSX or PDF from your bank and drop it here. Rows are matched " +
+                "Export CSV or XLSX from your bank and drop it here. Rows are matched " +
                     "against what you have already logged, so a scanned receipt and its statement " +
                     "line merge instead of counting twice.",
                 "Needs nothing at all. Parsed on this device.",
@@ -1426,15 +1688,34 @@ private fun CaptureCard(
  * second store of progress that can drift away from the money.
  */
 @Composable
-fun RewardsScreen(state: LedgerState, onBack: () -> Unit) {
+fun RewardsScreen(
+    state: LedgerState,
+    prefs: AppPrefs,
+    onBack: () -> Unit,
+    onSweep: (goalId: String, amountMinor: Long) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
-    var leaderboard by remember { mutableStateOf(false) }
 
     val earned = state.badges.count { it.earnedOn != null }
     val xp = state.transactions.size * 10 + earned * 250 + state.loggingStreakDays * 15
     val level = xp / 400 + 1
     val intoLevel = (xp % 400) / 400f
+
+    var showGrowth by remember { mutableStateOf(prefs.showGrowth) }
+    var roundUpOn by remember { mutableStateOf(prefs.roundUpEnabled) }
+    var roundTo by remember { mutableStateOf(prefs.roundUpToMinor) }
+    var goalId by remember { mutableStateOf(prefs.roundUpGoalId) }
+    var sweptOn by remember { mutableStateOf(prefs.roundUpSweptOn) }
+
+    // Derived from the ledger every time this screen reads, never accrued into a counter.
+    val waiting = if (!roundUpOn) 0L else roundUpsSince(
+        state.allTransactions,
+        sweptOn,
+        roundTo,
+        state.conversion,
+    )
+    val target = state.goals.firstOrNull { it.id == goalId } ?: state.goals.firstOrNull()
 
     DetailScaffold(title = "Progress", onBack = onBack) {
         item {
@@ -1564,36 +1845,140 @@ fun RewardsScreen(state: LedgerState, onBack: () -> Unit) {
             }
         }
 
-        item { SectionHeading("Comparing with people") }
+        if (showGrowth) {
+            item { SectionHeading("Your bed", caption = "It grows with your goals and your streak") }
+            item {
+                Plate(depth = 1) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        KelpBed(
+                            progress = kelpProgress(
+                                goalFractions = state.goals.map { it.fraction },
+                                loggingStreakDays = state.loggingStreakDays,
+                            ),
+                            animate = motionEnabled(),
+                        )
+                        Text(
+                            if (state.goals.isEmpty()) {
+                                "Nothing planted yet. Open a savings goal and this fills out as " +
+                                    "you put money into it."
+                            } else {
+                                "Grown from how far along your goals are and how long you have " +
+                                    "been logging. Nothing else feeds it."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        item { SectionHeading("Round-ups", caption = "Change from every spend, put aside when you say so") }
         item {
             Plate(depth = 1) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Marker(Icons.Rounded.Leaderboard, tint = scheme.onSurfaceVariant, size = 38.dp)
-                        Column(
-                            Modifier
-                                .weight(1f)
-                                .padding(start = 12.dp)
-                        ) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ToggleRow(
+                        "Collect the change",
+                        "Rounds every expense up and keeps a running total here. Nothing moves " +
+                            "until you sweep it.",
+                        roundUpOn,
+                    ) {
+                        roundUpOn = it
+                        prefs.roundUpEnabled = it
+                    }
+
+                    if (roundUpOn) {
+                        ChipRow {
+                            ROUND_UP_STEPS.forEach { (step, label) ->
+                                Chip(
+                                    label,
+                                    selected = roundTo == step,
+                                    onClick = {
+                                        roundTo = step
+                                        prefs.roundUpToMinor = step
+                                    },
+                                )
+                            }
+                        }
+
+                        if (state.goals.isEmpty()) {
                             Text(
-                                "Share a leaderboard",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = scheme.onSurface,
+                                "Open a savings goal and the change has somewhere to go.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        } else {
+                            ChipRow {
+                                state.goals.forEach { goal ->
+                                    Chip(
+                                        goal.name,
+                                        selected = target?.id == goal.id,
+                                        onClick = {
+                                            goalId = goal.id
+                                            prefs.roundUpGoalId = goal.id
+                                        },
+                                    )
+                                }
+                            }
+                            Stat("Waiting to be swept", waiting, style = MoneyType.medium)
+                            Pill(
+                                if (waiting <= 0L) {
+                                    "Nothing to sweep yet"
+                                } else {
+                                    "Sweep ${money(waiting)} into ${target?.name.orEmpty()}"
+                                },
+                                Icons.Rounded.Savings,
+                                {
+                                    val goal = target
+                                    if (waiting > 0L && goal != null) {
+                                        onSweep(goal.id, waiting)
+                                        prefs.roundUpSweptOn = today
+                                        sweptOn = today
+                                    }
+                                },
+                                emphasis = waiting > 0L,
+                                enabled = waiting > 0L && target != null,
                             )
                             Text(
-                                "Off by default",
+                                sweptOn?.let { "Last swept ${dayLabel(it)}." }
+                                    ?: "Counted from everything in the ledger so far.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = scheme.onSurfaceVariant,
                             )
                         }
-                        Switch(checked = leaderboard, onCheckedChange = { leaderboard = it })
                     }
-                    Text(
-                        "Only savings rate and streak length are ever shared, and only with people " +
-                            "already in a shared wallet. Balances and transactions never are.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant,
-                    )
+                }
+            }
+        }
+
+        item { SectionHeading("Comparing with people") }
+        item {
+            // No switch here.
+            //
+            // A leaderboard compares your savings rate against people in a shared wallet, and a
+            // shared wallet is Firebase, which is not started: it needs a project owned by
+            // whoever ships this, with OAuth clients tied to the release signing certificate.
+            // A toggle that stored a preference no server will ever read is a control wired to
+            // nothing dressed up as a feature, so this says what is true instead.
+            EmptyWater(
+                "Leaderboards need a shared wallet",
+                "Comparing savings rate or streak length only means anything against people you " +
+                    "share a wallet with, and shared wallets are part of sync, which is not " +
+                    "built. When it is, this turns on here and stays off until you say so. " +
+                    "Only savings rate and streak length would ever be shared; balances and " +
+                    "transactions never.",
+            )
+        }
+        item {
+            Plate {
+                ToggleRow(
+                    "Show the growing bed",
+                    "Turn it off and Progress is figures only. The README asks for this to be " +
+                        "skippable, and a decoration nobody wants is worse than none.",
+                    showGrowth,
+                ) {
+                    showGrowth = it
+                    prefs.showGrowth = it
                 }
             }
         }

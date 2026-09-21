@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.short
+import com.moneymanager.data.Money
 import com.moneymanager.data.symbolOf
 import com.moneymanager.ui.MoneyType
 import com.moneymanager.ui.Plate
@@ -85,7 +86,7 @@ fun AmountInput(
     digits: String,
     onDigits: (String) -> Unit,
     label: String,
-    currency: String = "USD",
+    currency: String = Money.base,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme

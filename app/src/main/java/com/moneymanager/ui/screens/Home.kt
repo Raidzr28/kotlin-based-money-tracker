@@ -66,6 +66,7 @@ import com.moneymanager.ui.Plate
 import com.moneymanager.ui.Routes
 import com.moneymanager.ui.ScaffoldNote
 import com.moneymanager.ui.SectionHeading
+import com.moneymanager.ui.ShortTotalNote
 import com.moneymanager.ui.SoundingLine
 import com.moneymanager.ui.Stat
 import com.moneymanager.ui.WaterBar
@@ -321,6 +322,7 @@ fun HomeScreen(
                         )
                     }
                     SoundingLine(state.netWorthAssets, state.netWorthDebts)
+                    ShortTotalNote(state.unconvertible, state.baseCurrency)
                 }
             }
         }
@@ -465,6 +467,7 @@ internal fun BillRow(
         }
         MoneyText(
             -bill.amountMinor,
+            currency = bill.currency,
             style = MoneyType.row,
             color = if (overdue) water.alert else toneFor(Flow.Out),
         )

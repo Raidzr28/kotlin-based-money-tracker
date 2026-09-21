@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.money
+import com.moneymanager.data.weekdayInitials
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
@@ -358,7 +359,8 @@ fun CashFlowGrid(
 ) {
     val scheme = MaterialTheme.colorScheme
     val peak = (daily.maxOrNull() ?: 1L).coerceAtLeast(1L).toFloat()
-    val weekdays = listOf("M", "T", "W", "T", "F", "S", "S")
+    // Whichever day the user starts their week on leads the row.
+    val weekdays = weekdayInitials()
 
     Column(modifier) {
         Row(Modifier.fillMaxWidth()) {
@@ -498,7 +500,8 @@ fun DueCalendar(
 ) {
     val scheme = MaterialTheme.colorScheme
     val water = MoneyTheme.water
-    val weekdays = listOf("M", "T", "W", "T", "F", "S", "S")
+    // Whichever day the user starts their week on leads the row.
+    val weekdays = weekdayInitials()
 
     Column(modifier) {
         Row(Modifier.fillMaxWidth()) {

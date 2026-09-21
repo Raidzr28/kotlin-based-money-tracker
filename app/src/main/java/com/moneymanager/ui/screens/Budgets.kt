@@ -441,6 +441,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.zeroBased(state: Ledg
                         )
                         MoneyText(
                             goal.targetMinor - goal.savedMinor,
+                            currency = goal.currency,
                             style = MoneyType.small,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

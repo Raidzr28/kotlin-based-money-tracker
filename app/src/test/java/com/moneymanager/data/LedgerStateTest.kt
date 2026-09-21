@@ -130,6 +130,45 @@ class LedgerStateTest {
     }
 
     @Test
+    fun `net worth counts what you own, not just what is in the accounts`() {
+        // The point of tracking a possession: two thousand spent on a laptop is not two thousand
+        // gone, it is two thousand turned into a thing.
+        val state = LedgerState(
+            accounts = listOf(account("cash", AccountKind.Cash, 500_00L)),
+            assets = listOf(
+                Asset("a1", "Laptop", 2_000_00L, today, usefulLifeMonths = null),
+            ),
+        )
+        assertEquals(2_500_00L, state.netWorthMinor)
+        assertEquals(2_000_00L, state.assetsMinor)
+    }
+
+    @Test
+    fun `a possession past its useful life stops propping up net worth`() {
+        val state = LedgerState(
+            accounts = listOf(account("cash", AccountKind.Cash, 500_00L)),
+            assets = listOf(
+                Asset("a1", "Old laptop", 2_000_00L, today.minusYears(5), usefulLifeMonths = 36),
+            ),
+        )
+        assertEquals(500_00L, state.netWorthMinor)
+    }
+
+    @Test
+    fun `net worth history does not credit a possession bought after that month`() {
+        // Bought today, so every earlier point on the twelve-month line must exclude it.
+        val state = LedgerState(
+            accounts = listOf(account("cash", AccountKind.Cash, 500_00L)),
+            assets = listOf(Asset("a1", "Laptop", 2_000_00L, today, usefulLifeMonths = null)),
+        )
+        val line = state.netWorthAssets
+        assertEquals(12, line.size)
+        assertEquals(2_500_00L, line.last())
+        // The month before it was bought knows nothing about it.
+        assertEquals(500_00L, line[line.size - 2])
+    }
+
+    @Test
     fun `liquid money excludes savings and anything overdrawn`() {
         val state = LedgerState(
             accounts = listOf(
@@ -222,6 +261,154 @@ class LedgerStateTest {
         // No debts and no accounts is the state of a fresh install, not an achievement.
         val badge = LedgerState().badges.first { it.id == "ba4" }
         assertEquals(null, badge.earnedOn)
+    }
+
+    // --- One currency out ---------------------------------------------------------------------
+
+    /** USD base. 0.92 EUR and 16,000 IDR to the dollar; nothing published for KRW. */
+    private fun usdBase() = Conversion(
+        base = "USD",
+        enabled = true,
+        rates = Rates(
+            base = "USD",
+            date = LocalDate.of(2026, 9, 19),
+            perBaseMicros = mapOf("EUR" to 920_000L, "IDR" to 16_000_000_000L),
+            fetchedAtEpochSecond = 1_000L,
+        ),
+    )
+
+    private fun foreign(id: String, kind: AccountKind, balance: Long, currency: String) =
+        Account(id, id, kind, balance, currency)
+
+    @Test
+    fun `an account in another currency is converted before it is added`() {
+        val state = LedgerState(
+            accounts = listOf(
+                foreign("usd", AccountKind.Bank, 100_00L, "USD"),
+                foreign("eur", AccountKind.Bank, 92_00L, "EUR"),
+            ),
+            conversion = usdBase(),
+        )
+        // 92.00 EUR at 0.92 to the dollar is 100.00 USD.
+        assertEquals(200_00L, state.netWorthMinor)
+        assertEquals(200_00L, state.liquidMinor)
+        assertTrue(state.totalsAreComplete)
+    }
+
+    @Test
+    fun `a currency with no rate is left out of the total and named`() {
+        val state = LedgerState(
+            accounts = listOf(
+                foreign("usd", AccountKind.Bank, 100_00L, "USD"),
+                foreign("krw", AccountKind.Bank, 500_000_00L, "KRW"),
+            ),
+            conversion = usdBase(),
+        )
+        // Half a million won added in raw would read as half a million dollars. Better short.
+        assertEquals(100_00L, state.netWorthMinor)
+        assertEquals(listOf("KRW"), state.unconvertible)
+        assertFalse(state.totalsAreComplete)
+    }
+
+    @Test
+    fun `spending abroad counts against the budget in the base`() {
+        val eurRow = spend(46_00L, category = "food").copy(id = "eur", currency = "EUR")
+        val state = LedgerState(
+            transactions = listOf(eurRow),
+            allTransactions = listOf(eurRow),
+            conversion = usdBase(),
+        )
+        assertEquals(50_00L, state.spendByCategory().single().second)
+        assertEquals(50_00L, state.monthlyOut.last())
+        assertEquals(50_00L, state.topMerchants.single().totalMinor)
+    }
+
+    @Test
+    fun `switching the base re-reads the same ledger`() {
+        val accounts = listOf(foreign("eur", AccountKind.Bank, 92_00L, "EUR"))
+        val inUsd = LedgerState(accounts = accounts, conversion = usdBase())
+        assertEquals(100_00L, inUsd.netWorthMinor)
+
+        val eurBase = Conversion(
+            base = "EUR",
+            enabled = true,
+            rates = Rates("EUR", LocalDate.of(2026, 9, 19), mapOf("USD" to 1_086_956L), 1_000L),
+        )
+        val inEur = LedgerState(accounts = accounts, conversion = eurBase)
+        assertEquals(92_00L, inEur.netWorthMinor)
+        assertEquals("EUR", inEur.baseCurrency)
+    }
+
+    @Test
+    fun `single currency needs no rates at all`() {
+        // The ordinary case: multi-currency off, nothing fetched, everything still totals.
+        val state = LedgerState(
+            accounts = listOf(foreign("usd", AccountKind.Bank, 100_00L, "USD")),
+            transactions = listOf(spend(20_00L)),
+        )
+        assertEquals(100_00L, state.netWorthMinor)
+        assertEquals(20_00L, state.spendByCategory().single().second)
+        assertTrue(state.totalsAreComplete)
+    }
+
+    // --- Bills, goals and debts borrow their account's currency --------------------------------
+
+    @Test
+    fun `a bill takes the currency of the account it is paid from`() {
+        Accounts.snapshot = listOf(
+            Account("usd", "Everyday", AccountKind.Bank, 0, "USD"),
+            Account("eur", "Berlin", AccountKind.Bank, 0, "EUR"),
+        )
+        val here = Bill("b1", "Rent", 100_00L, today, Recurrence.Monthly, "usd")
+        val there = Bill("b2", "Miete", 100_00L, today, Recurrence.Monthly, "eur")
+        assertEquals("USD", here.currency)
+        assertEquals("EUR", there.currency)
+    }
+
+    @Test
+    fun `a bill whose account is gone falls back to the display base rather than to dollars`() {
+        Accounts.snapshot = emptyList()
+        Money.base = "GBP"
+        try {
+            assertEquals("GBP", Bill("b", "Orphan", 1L, today, Recurrence.Monthly, "missing").currency)
+        } finally {
+            Money.base = "USD"
+        }
+    }
+
+    @Test
+    fun `a foreign bill is converted before it is committed against the month`() {
+        Accounts.snapshot = listOf(Account("eur", "Berlin", AccountKind.Bank, 0, "EUR"))
+        val state = LedgerState(
+            budgets = listOf(Budget("food", 400_00L, 0L)),
+            bills = listOf(
+                Bill("b1", "Miete", 92_00L, today.plusDays(1), Recurrence.Monthly, "eur"),
+            ),
+            conversion = usdBase(),
+        )
+        assertEquals(100_00L, state.committedMinor)
+        assertEquals(300_00L, state.safeToSpendMinor)
+    }
+
+    @Test
+    fun `a foreign debt is converted before it is owed`() {
+        Accounts.snapshot = listOf(Account("eur", "Berlin", AccountKind.Bank, 0, "EUR"))
+        val state = LedgerState(
+            debts = listOf(Debt("d1", "Kredit", 92_00L, 0, 10_00L, "eur")),
+            conversion = usdBase(),
+        )
+        assertEquals(-100_00L, state.netWorthMinor)
+    }
+
+    @Test
+    fun `a bill in a currency with no rate is named rather than dropped in silence`() {
+        Accounts.snapshot = listOf(Account("krw", "Seoul", AccountKind.Bank, 0, "KRW"))
+        val state = LedgerState(
+            bills = listOf(Bill("b1", "Rent", 500_000_00L, today, Recurrence.Monthly, "krw")),
+            conversion = usdBase(),
+        )
+        assertEquals(0L, state.committedMinor)
+        assertEquals(listOf("KRW"), state.unconvertible)
     }
 
     // --- Series -------------------------------------------------------------------------------

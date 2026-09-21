@@ -42,6 +42,9 @@ private val byKey: Map<String, ImageVector> = mapOf(
     "savings" to Icons.Rounded.Savings,
 )
 
+/** Every icon a user can pick from, in the order the picker offers them. */
+val iconKeys: List<String> = byKey.keys.toList()
+
 fun iconFor(key: String): ImageVector = byKey[key] ?: Icons.Rounded.Category
 
 /** Reads exactly like the old model property, so no call site had to change. */

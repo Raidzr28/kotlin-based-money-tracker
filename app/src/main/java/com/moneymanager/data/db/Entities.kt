@@ -190,6 +190,24 @@ data class DebtEntity(
 )
 
 /**
+ * Something the user owns that is worth money.
+ *
+ * Stores the price and the expected life, never the current value: what it is worth today is a
+ * function of those two and the clock, and a stored figure would be stale by morning.
+ */
+@Entity(tableName = "assets")
+data class AssetEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val costMinor: Long,
+    val boughtEpochDay: Long,
+    val usefulLifeMonths: Int? = null,
+    val warrantyUntilEpochDay: Long? = null,
+    val accountId: String? = null,
+    val sortOrder: Int = 0,
+)
+
+/**
  * Merchant to category, learned from the user's own corrections. Local, and only ever used to
  * pre-fill a form the user still confirms.
  */
@@ -198,4 +216,23 @@ data class MerchantMemoryEntity(
     @PrimaryKey val merchant: String,
     val categoryId: String,
     val hits: Int = 1,
+)
+
+/**
+ * A saved transaction shape. Rent, salary, the weekly shop.
+ *
+ * Holds no date and no history: it is a stencil, not a ledger row. Applying one opens the
+ * editor pre-filled, and the transaction it eventually writes is an ordinary [TxnEntity] with
+ * no link back here -- deleting a template must never disturb what was already logged.
+ */
+@Entity(tableName = "templates")
+data class TemplateEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val amountMinor: Long,
+    val merchant: String,
+    val categoryId: String,
+    val accountId: String,
+    val note: String? = null,
+    val sortOrder: Int = 0,
 )

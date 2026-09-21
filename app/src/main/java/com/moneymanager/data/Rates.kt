@@ -1,6 +1,9 @@
 package com.moneymanager.data
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -97,6 +100,34 @@ fun parseRatesJson(body: String, fetchedAtEpochSecond: Long): Rates? = runCatchi
 }.getOrNull()
 
 /**
+ * What the app totals into, and what it has to convert with.
+ *
+ * Passed down with the ledger rather than read from preferences at the point of use, so every
+ * figure on a screen was converted with the same table at the same moment. A total assembled from
+ * two different rate tables is a total that belongs to no particular day.
+ */
+data class Conversion(
+    val base: String = "USD",
+    /** Whether the user has asked for more than one currency. A UI concern, not a maths one. */
+    val enabled: Boolean = false,
+    val rates: Rates? = null,
+) {
+    /** True when [from] can be expressed in [base] at all. */
+    fun canConvert(from: String): Boolean =
+        from == base || rates?.microsFor(from) != null
+
+    /**
+     * [amountMinor], held in [from], expressed in [base]. Null when no rate connects the two.
+     *
+     * Never falls back to the raw number. Forty euros shown as forty dollars because a rate was
+     * missing is not an approximation, it is a wrong figure with a currency symbol on it.
+     */
+    fun toBase(amountMinor: Long, from: String): Long? =
+        if (from == base) amountMinor
+        else rates?.let { convertMinor(amountMinor, from, base, it) }
+}
+
+/**
  * Holds the last rates seen and knows how to go and get new ones.
  *
  * Cached in preferences so the app converts correctly with the network off, which is the normal
@@ -109,11 +140,38 @@ class RatesStore(context: Context) {
 
     var baseCurrency: String
         get() = prefs.getString(KEY_BASE, "USD") ?: "USD"
-        set(value) = prefs.edit().putString(KEY_BASE, value).apply()
+        set(value) {
+            prefs.edit().putString(KEY_BASE, value).apply()
+            publish()
+        }
 
     var multiCurrencyEnabled: Boolean
         get() = prefs.getBoolean(KEY_ENABLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_ENABLED, value).apply()
+        set(value) {
+            prefs.edit().putBoolean(KEY_ENABLED, value).apply()
+            publish()
+        }
+
+    /*
+     * Preferences do not emit, and until now nothing downstream of a base-currency change was
+     * told about it: the setting was writable and changed nothing anyone could see. This is the
+     * one line between that screen and every figure in the app.
+     */
+    init {
+        // Before anything renders. Otherwise the first frame after a cold start is drawn in
+        // whatever Money.base happened to default to, and corrects itself a moment later.
+        Money.base = baseCurrency
+    }
+
+    private val _conversion = MutableStateFlow(snapshot())
+    val conversion: StateFlow<Conversion> = _conversion.asStateFlow()
+
+    private fun snapshot() = Conversion(baseCurrency, multiCurrencyEnabled, cached())
+
+    private fun publish() {
+        _conversion.value = snapshot()
+        Money.base = baseCurrency
+    }
 
     fun cached(): Rates? {
         val body = prefs.getString(KEY_BODY, null) ?: return null
@@ -157,6 +215,7 @@ class RatesStore(context: Context) {
             .putLong(KEY_AT, now)
             .putBoolean(KEY_MANUAL, false)
             .apply()
+        publish()
         return parsed
     }
 
@@ -181,6 +240,7 @@ class RatesStore(context: Context) {
             .putLong(KEY_AT, System.currentTimeMillis() / 1000)
             .putBoolean(KEY_MANUAL, true)
             .apply()
+        publish()
     }
 
     private companion object {

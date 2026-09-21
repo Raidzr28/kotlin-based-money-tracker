@@ -61,7 +61,13 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import android.os.Build
+import com.moneymanager.AppearanceState
+import com.moneymanager.data.AppPrefs
 import com.moneymanager.data.LedgerState
+import com.moneymanager.data.Periods
+import com.moneymanager.data.ThemeMode
+import java.time.DayOfWeek
 import com.moneymanager.data.RATE_SCALE
 import com.moneymanager.data.RatesStore
 import com.moneymanager.data.SUPPORTED_CURRENCIES
@@ -146,7 +152,7 @@ fun MoreScreen(state: LedgerState, onGo: (String) -> Unit) {
                     NavRow(
                         Icons.Rounded.Language, "Currencies",
                         subtitle = "Base currency and exchange rates",
-                        trailing = "USD",
+                        trailing = state.baseCurrency,
                         tint = scale[6],
                     ) { onGo(Routes.CURRENCY) }
                 }
@@ -195,12 +201,25 @@ fun MoreScreen(state: LedgerState, onGo: (String) -> Unit) {
 /* ---------------------------------------------------------------- Settings */
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onGo: (String) -> Unit, onLoadDemo: () -> Unit) {
+fun SettingsScreen(
+    prefs: AppPrefs,
+    appearance: AppearanceState,
+    templateCount: Int,
+    categoryCount: Int,
+    onBack: () -> Unit,
+    onGo: (String) -> Unit,
+    onLoadDemo: () -> Unit,
+    onExport: () -> Unit,
+    onPinWidget: () -> Unit,
+    onDeleteEverything: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
-    var theme by remember { mutableStateOf("Follow the system") }
-    var materialYou by remember { mutableStateOf(false) }
-    var monthStart by remember { mutableStateOf("1st") }
-    var weekStart by remember { mutableStateOf("Monday") }
+    var monthStart by remember { mutableStateOf(prefs.monthStartDay) }
+    var weekStart by remember { mutableStateOf(prefs.weekStart) }
+    // Two taps to erase a ledger, and the second one carries a different label. The subtitle
+    // has always promised this; arming it in local state keeps the promise, and leaving the
+    // screen disarms it, which is the behaviour you want from a control this size.
+    var armedToDelete by remember { mutableStateOf(false) }
 
     DetailScaffold(title = "Settings", onBack = onBack) {
         item { SectionHeading("Appearance", caption = "The app is built dark; light is a full second scheme, not an inversion.") }
@@ -208,37 +227,68 @@ fun SettingsScreen(onBack: () -> Unit, onGo: (String) -> Unit, onLoadDemo: () ->
             Plate {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ChipRow {
-                        listOf("Follow the system", "Always dark", "Always light").forEach {
-                            Chip(it, selected = theme == it, onClick = { theme = it })
+                        ThemeMode.entries.forEach { mode ->
+                            Chip(
+                                mode.label,
+                                selected = appearance.themeMode == mode,
+                                onClick = { appearance.useTheme(mode) },
+                            )
                         }
                     }
-                    ToggleRow(
-                        "Use my wallpaper's colours",
-                        "Material You replaces the depth palette. The waterline stops carrying " +
-                            "meaning, so this is off unless you want it.",
-                        materialYou,
-                    ) { materialYou = it }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        ToggleRow(
+                            "Use my wallpaper colours",
+                            "Material You takes the plates, chips and sheets. The water column " +
+                                "keeps its own depth palette, because that ladder is what makes " +
+                                "the waterline a reading rather than a decoration.",
+                            appearance.materialYou,
+                        ) { appearance.useMaterialYou(it) }
+                    }
                 }
             }
         }
 
-        item { SectionHeading("Periods") }
+        item { SectionHeading("Periods", caption = "Every figure on Home and Budgets is measured over this.") }
         item {
             Plate {
                 Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Month starts on the", style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
                         ChipRow {
-                            listOf("1st", "15th", "25th", "Payday").forEach {
-                                Chip(it, selected = monthStart == it, onClick = { monthStart = it })
-                            }
+                            listOf(1 to "1st", 15 to "15th", 25 to "25th", Periods.PAYDAY to "Payday")
+                                .forEach { (day, label) ->
+                                    Chip(
+                                        label,
+                                        selected = monthStart == day,
+                                        onClick = {
+                                            monthStart = day
+                                            prefs.setPeriods(day, weekStart)
+                                        },
+                                    )
+                                }
+                        }
+                        if (monthStart == Periods.PAYDAY) {
+                            Text(
+                                "Read off your own income: the median day of the month money " +
+                                    "arrived over the last six. Currently the " +
+                                    ordinal(Periods.startDay) + ".",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
                         }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Week starts on", style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
                         ChipRow {
-                            listOf("Monday", "Sunday", "Saturday").forEach {
-                                Chip(it, selected = weekStart == it, onClick = { weekStart = it })
+                            listOf(DayOfWeek.MONDAY, DayOfWeek.SUNDAY, DayOfWeek.SATURDAY).forEach { day ->
+                                Chip(
+                                    day.name.lowercase().replaceFirstChar { it.uppercase() },
+                                    selected = weekStart == day,
+                                    onClick = {
+                                        weekStart = day
+                                        prefs.setPeriods(monthStart, day)
+                                    },
+                                )
                             }
                         }
                     }
@@ -253,21 +303,27 @@ fun SettingsScreen(onBack: () -> Unit, onGo: (String) -> Unit, onLoadDemo: () ->
                     NavRow(
                         Icons.Rounded.Repeat, "Recurring templates",
                         subtitle = "Rent, salary and anything else that repeats",
-                        trailing = "3",
-                    ) {}
+                        trailing = templateCount.toString(),
+                    ) { onGo(Routes.TEMPLATES) }
                     NavRow(
                         Icons.Rounded.Category, "Categories",
-                        subtitle = "Icons, colours, subcategories",
-                        trailing = "${com.moneymanager.data.Categories.all.size}",
-                    ) {}
+                        subtitle = "Icons, names, sub-categories",
+                        trailing = categoryCount.toString(),
+                    ) { onGo(Routes.CATEGORIES) }
                     NavRow(
                         Icons.Rounded.Widgets, "Home screen widget",
-                        subtitle = "Today's spend, balance, next bill",
-                    ) {}
+                        subtitle = "Today spend, balance, next bill",
+                        onClick = onPinWidget,
+                    )
                     NavRow(
                         Icons.Rounded.Tune, "Notifications",
-                        subtitle = "Bill reminders and streak warnings",
-                    ) {}
+                        subtitle = if (prefs.remindersEnabled) {
+                            "On, " + prefs.remindDaysBefore + " days before at " +
+                                "%02d:00".format(prefs.remindHour)
+                        } else {
+                            "Off"
+                        },
+                    ) { onGo(Routes.NOTIFICATIONS) }
                 }
             }
         }
@@ -281,14 +337,46 @@ fun SettingsScreen(onBack: () -> Unit, onGo: (String) -> Unit, onLoadDemo: () ->
                         subtitle = "A month of invented activity, for trying the app out",
                         onClick = onLoadDemo,
                     )
-                    NavRow(Icons.Rounded.Download, "Export everything", subtitle = "CSV or JSON, written where you choose") {}
+                    NavRow(
+                        Icons.Rounded.Download, "Export everything",
+                        subtitle = "CSV, written where you choose",
+                        onClick = onExport,
+                    )
                     NavRow(Icons.Rounded.CloudSync, "Backup & sync", subtitle = "Off") { onGo(Routes.SYNC) }
-                    NavRow(Icons.Rounded.Description, "Delete all data", subtitle = "Irreversible, and it asks twice") {}
+                    NavRow(
+                        Icons.Rounded.Description,
+                        if (armedToDelete) "Tap again to erase everything" else "Delete all data",
+                        subtitle = if (armedToDelete) {
+                            "Every transaction, budget, bill, goal and debt. This cannot be undone."
+                        } else {
+                            "Irreversible, and it asks twice"
+                        },
+                        tint = if (armedToDelete) MoneyTheme.water.alert else scheme.primary,
+                    ) {
+                        if (armedToDelete) {
+                            armedToDelete = false
+                            onDeleteEverything()
+                        } else {
+                            armedToDelete = true
+                        }
+                    }
                 }
             }
         }
         item { Spacer(Modifier.height(12.dp)) }
     }
+}
+
+/** "25th", for a sentence about a derived payday. */
+private fun ordinal(day: Int): String {
+    val suffix = when {
+        day % 100 in 11..13 -> "th"
+        day % 10 == 1 -> "st"
+        day % 10 == 2 -> "nd"
+        day % 10 == 3 -> "rd"
+        else -> "th"
+    }
+    return day.toString() + suffix
 }
 
 @Composable

@@ -139,6 +139,13 @@ interface CategoryDao {
 
     @Query("SELECT COUNT(*) FROM categories")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM categories WHERE id = :id")
+    suspend fun byId(id: String): CategoryEntity?
+
+    /** Archived ones too: the editor is the one place that has to see what it can restore. */
+    @Query("SELECT * FROM categories ORDER BY archived, sortOrder, label")
+    fun observeIncludingArchived(): Flow<List<CategoryEntity>>
 }
 
 @Dao
@@ -213,11 +220,53 @@ interface MerchantMemoryDao {
     @Query("SELECT categoryId FROM merchant_memory WHERE merchant = :merchant")
     suspend fun categoryFor(merchant: String): String?
 
-    @Query(
-        """
-        INSERT INTO merchant_memory (merchant, categoryId, hits) VALUES (:merchant, :categoryId, 1)
-        ON CONFLICT(merchant) DO UPDATE SET categoryId = :categoryId, hits = hits + 1
-        """
-    )
-    suspend fun remember(merchant: String, categoryId: String)
+    /*
+     * Deliberately not SQLite's UPSERT.
+     *
+     * `INSERT ... ON CONFLICT DO UPDATE` needs SQLite 3.24, which Android did not ship until
+     * API 30. This app's minSdk is 26, and remember() runs on every manually logged transaction,
+     * so the tidier statement threw on every log on Android 8, 9 and 10.
+     *
+     * UPDATE-then-INSERT is the portable spelling and works on every version back to the floor.
+     */
+    @Query("UPDATE merchant_memory SET categoryId = :categoryId, hits = hits + 1 WHERE merchant = :merchant")
+    suspend fun bump(merchant: String, categoryId: String): Int
+
+    @Query("INSERT OR IGNORE INTO merchant_memory (merchant, categoryId, hits) VALUES (:merchant, :categoryId, 1)")
+    suspend fun insertFirst(merchant: String, categoryId: String)
+
+    @Transaction
+    suspend fun remember(merchant: String, categoryId: String) {
+        if (bump(merchant, categoryId) == 0) insertFirst(merchant, categoryId)
+    }
+}
+
+@Dao
+interface TemplateDao {
+    @Query("SELECT * FROM templates ORDER BY sortOrder, name")
+    fun observeAll(): Flow<List<TemplateEntity>>
+
+    @Upsert
+    suspend fun upsert(template: TemplateEntity)
+
+    @Query("DELETE FROM templates WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("SELECT COUNT(*) FROM templates")
+    fun observeCount(): Flow<Int>
+}
+
+@Dao
+interface AssetDao {
+    @Query("SELECT * FROM assets ORDER BY sortOrder, name")
+    fun observeAll(): Flow<List<AssetEntity>>
+
+    @Query("SELECT * FROM assets WHERE id = :id")
+    suspend fun byId(id: String): AssetEntity?
+
+    @Upsert
+    suspend fun upsert(asset: AssetEntity)
+
+    @Query("DELETE FROM assets WHERE id = :id")
+    suspend fun deleteById(id: String)
 }

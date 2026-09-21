@@ -1,11 +1,14 @@
 package com.moneymanager.ui
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -13,6 +16,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -307,14 +311,35 @@ private val MoneyShapes = Shapes(
     extraLarge = RoundedCornerShape(36.dp),
 )
 
+/**
+ * @param dark which of the two authored schemes to run.
+ * @param dynamic opt in to Material You for the Material roles.
+ *
+ * Material You reaches the Material surfaces -- plates, chips, sheets, the nav bar -- and stops
+ * there. The water palette stays authored on purpose: the depth ladder is what makes the
+ * waterline a reading rather than a decoration, and a wallpaper-derived scheme reorders those
+ * five steps into whatever order the wallpaper happens to imply. Letting the surfaces follow the
+ * phone while the column keeps its own depth is the opt-in the design system can actually honour.
+ *
+ * Dynamic colour needs API 31; below that this falls back to the authored scheme, which is what
+ * the platform does for every other app too.
+ */
 @Composable
 fun MoneyManagerTheme(
     dark: Boolean = isSystemInDarkTheme(),
+    dynamic: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
+    val colours = when {
+        dynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        dark -> DarkScheme
+        else -> LightScheme
+    }
     CompositionLocalProvider(LocalWater provides if (dark) DarkWater else LightWater) {
         MaterialTheme(
-            colorScheme = if (dark) DarkScheme else LightScheme,
+            colorScheme = colours,
             typography = MoneyTypography,
             shapes = MoneyShapes,
             content = content,

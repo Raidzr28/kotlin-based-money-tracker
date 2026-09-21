@@ -97,6 +97,18 @@ Hard constraints:
   discipline it did not earn.
 - Leaderboards are opt-in, off by default, and never expose raw balances.
 
+- Multi-currency: accounts are held in their own currency, every total is converted into
+  the base currency, and a currency with no rate is left out of the total and named on
+  screen. Nothing is ever added in raw. Forty euros shown as forty dollars because a rate
+  was missing is not an approximation, it is a wrong figure with a currency symbol on it.
+- Bills, goals and debts have no currency of their own. Each is denominated in the currency
+  of the account it is paid from, saved into, or settled against, and reads it from there.
+  A stored column would be a second home for the same fact, free to disagree with the first.
+- A write that moves money across a currency boundary converts, or it is refused and the
+  user is told. Transfers, goal contributions and debt payments all return whether they
+  happened. A write that silently does not happen is the worst outcome available, because
+  the user believes it did.
+
 Terminology: "accounts" (also called wallets) hold money; transfers between them are
 excluded from income and expense totals.
 

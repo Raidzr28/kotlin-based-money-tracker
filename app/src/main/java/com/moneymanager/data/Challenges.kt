@@ -2,6 +2,7 @@ package com.moneymanager.data
 
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.WeekFields
 import kotlin.math.absoluteValue
 
 /*
@@ -19,11 +20,18 @@ import kotlin.math.absoluteValue
  */
 
 /** Money out per day. Splits do not matter at this resolution: a day's total is a day's total. */
-internal fun spendByDay(transactions: List<Txn>): Map<LocalDate, Long> =
+internal fun spendByDay(
+    transactions: List<Txn>,
+    conversion: Conversion = Conversion(),
+): Map<LocalDate, Long> =
     transactions
         .filter { it.flow == Flow.Out }
         .groupBy { it.date }
-        .mapValues { (_, rows) -> rows.sumOf { it.amountMinor.absoluteValue } }
+        .mapValues { (_, rows) ->
+            // A day's spend across two accounts in two currencies is one figure or it is
+            // nothing. Rows no rate reaches are left out rather than added in raw.
+            rows.sumOf { conversion.toBase(it.amountMinor, it.currency)?.absoluteValue ?: 0L }
+        }
 
 /** Median, not mean: one holiday weekend should not become the bar every other weekend is held to. */
 internal fun medianOf(values: List<Long>): Long {
@@ -122,15 +130,83 @@ internal fun leanRunChallenge(
     )
 }
 
+/**
+ * Money put into savings, week by week, for the year [today] falls in.
+ *
+ * "Saved" means a transfer that landed in an account of kind Savings -- which is what a goal
+ * contribution writes. Spending out of savings nets off against the week it left in, so a week
+ * that put fifty in and took forty back out counts ten, not fifty.
+ */
+internal fun savedByIsoWeek(
+    transactions: List<Txn>,
+    year: Int,
+    conversion: Conversion = Conversion(),
+): Map<Int, Long> {
+    val savingsAccounts = Accounts.all.filter { it.kind == AccountKind.Savings }.map { it.id }.toSet()
+    if (savingsAccounts.isEmpty()) return emptyMap()
+    return transactions
+        .filter { it.date.year == year && it.accountId in savingsAccounts }
+        .groupBy { it.date.get(WeekFields.ISO.weekOfWeekBasedYear()) }
+        .mapValues { (_, rows) -> rows.sumOf { conversion.toBase(it.amountMinor, it.currency) ?: 0L } }
+}
+
+/**
+ * The 52-week challenge: one unit in week one, two in week two, and so on.
+ *
+ * Pinned to the calendar year rather than to a start date the user picks, because this engine
+ * stores nothing -- there is no "joined on" to remember, so the year is the only start point
+ * both the app and the user can agree on without one.
+ *
+ * Reported against the whole year so far rather than the current week alone. A challenge that
+ * only ever shows this week's box hides the thing the user actually wants to know, which is
+ * whether they are ahead or behind overall.
+ */
+internal fun fiftyTwoWeekChallenge(
+    savedByWeek: Map<Int, Long>,
+    today: LocalDate,
+    unitMinor: Long,
+): Challenge? {
+    if (savedByWeek.isEmpty() || unitMinor <= 0L) return null
+    val week = today.get(WeekFields.ISO.weekOfWeekBasedYear()).coerceIn(1, 52)
+
+    // What the ladder has asked for by now: 1 + 2 + ... + week.
+    val askedMinor = unitMinor * week * (week + 1) / 2
+    val savedMinor = (1..week).sumOf { savedByWeek[it] ?: 0L }.coerceAtLeast(0L)
+    if (savedMinor <= 0L) return null
+
+    val ahead = savedMinor >= askedMinor
+    return Challenge(
+        id = "fifty-two-week",
+        name = "52-week challenge",
+        blurb = if (ahead) {
+            "Week $week asks for ${money(unitMinor * week)}. You are at ${money(savedMinor)} " +
+                "against the ${money(askedMinor)} the year has asked for so far."
+        } else {
+            "Week $week asks for ${money(unitMinor * week)}. You are ${money(askedMinor - savedMinor)} " +
+                "behind what the year has asked for so far."
+        },
+        dayOf = week,
+        days = 52,
+        savedMinor = savedMinor,
+    )
+}
+
 fun challengesFor(
     transactions: List<Txn>,
     today: LocalDate,
     paceMinor: Long,
+    conversion: Conversion = Conversion(),
 ): List<Challenge> {
-    val spend = spendByDay(transactions)
+    val spend = spendByDay(transactions, conversion)
     val earliest = transactions.minOfOrNull { it.date }
     return listOfNotNull(
         weekendChallenge(spend, today, earliest),
         leanRunChallenge(spend, today, paceMinor, earliest),
+        fiftyTwoWeekChallenge(
+            savedByIsoWeek(transactions, today.year, conversion),
+            today,
+            // One whole unit of the display currency -- the classic ladder is 1, 2, 3.
+            unitMinor = 100L,
+        ),
     )
 }

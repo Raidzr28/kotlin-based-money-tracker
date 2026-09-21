@@ -63,7 +63,11 @@ import com.moneymanager.data.SUPPORTED_CURRENCIES
 import com.moneymanager.data.convertMinor
 import com.moneymanager.data.dayLabel
 import com.moneymanager.data.Txn
+import com.moneymanager.data.LedgerQuery
 import com.moneymanager.data.money
+import java.time.LocalDate
+import com.moneymanager.data.today
+import com.moneymanager.data.Template
 import com.moneymanager.data.thisMonth
 import com.moneymanager.data.symbolOf
 import com.moneymanager.ui.icon
@@ -94,28 +98,75 @@ private enum class LedgerFilter(val label: String) {
     All("Everything"), Out("Money out"), In("Money in"), Transfers("Transfers")
 }
 
+/**
+ * How far back a search looks.
+ *
+ * The ledger shows the current cycle, which is the right default -- it is what the rest of the
+ * app is measured over. But "find that chemist in March" is the reason a search box exists at
+ * all, and a search that silently stops at the first of the month answers it wrongly rather
+ * than not at all.
+ */
+private enum class LedgerRange(val label: String) {
+    Cycle("This month"), Quarter("Last 3 months"), Year("This year"), Everything("All time");
+
+    /** The earliest date this range admits, or null when it admits everything it is given. */
+    fun from(): LocalDate? = when (this) {
+        Cycle -> null
+        Quarter -> today.minusMonths(3)
+        Year -> today.withDayOfYear(1)
+        Everything -> null
+    }
+}
+
 @Composable
 fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(LedgerFilter.All) }
     var taggedOnly by remember { mutableStateOf(false) }
+    var range by remember { mutableStateOf(LedgerRange.Cycle) }
+    var accountId by remember { mutableStateOf<String?>(null) }
+    var minDigits by remember { mutableStateOf("") }
+    var maxDigits by remember { mutableStateOf("") }
+    var filtersOpen by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
-    val matching = state.transactions.filter { txn ->
-        val hitsQuery = query.isBlank() ||
-            txn.merchant.contains(query, ignoreCase = true) ||
-            Categories[txn.categoryId].label.contains(query, ignoreCase = true) ||
-            txn.tags.any { it.contains(query, ignoreCase = true) }
-        val hitsFilter = when (filter) {
-            LedgerFilter.All -> true
-            LedgerFilter.Out -> txn.flow == Flow.Out
-            LedgerFilter.In -> txn.flow == Flow.In
-            LedgerFilter.Transfers -> txn.flow == Flow.Transfer
-        }
-        hitsQuery && hitsFilter && (!taggedOnly || txn.tags.isNotEmpty())
-    }
+    val minMinor = digitsToMinor(minDigits)
+    val maxMinor = digitsToMinor(maxDigits)
+
+    // Anything wider than the current cycle has to read the whole ledger; `transactions` is
+    // only ever this cycle's rows.
+    val pool = if (range == LedgerRange.Cycle) state.transactions else state.allTransactions
+    val from = range.from()
+
+    // The rule itself lives in the data layer, where it can be tested without a device.
+    val search = LedgerQuery(
+        text = query,
+        flow = when (filter) {
+            LedgerFilter.All -> null
+            LedgerFilter.Out -> Flow.Out
+            LedgerFilter.In -> Flow.In
+            LedgerFilter.Transfers -> Flow.Transfer
+        },
+        from = from,
+        accountId = accountId,
+        minMinor = minMinor,
+        maxMinor = maxMinor,
+        taggedOnly = taggedOnly,
+    )
+    val matching = search.filter(pool)
     val days = matching.groupBy { it.date }.toList().sortedByDescending { it.first }
+
+    val narrowed = range != LedgerRange.Cycle || accountId != null ||
+        minMinor > 0L || maxMinor > 0L || taggedOnly
+
+    fun clearFilters() {
+        range = LedgerRange.Cycle
+        accountId = null
+        minDigits = ""
+        maxDigits = ""
+        taggedOnly = false
+    }
 
     TabColumn(top = 12.dp, bottom = 96.dp) {
         item {
@@ -171,11 +222,13 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
                         )
                     }
                 } else {
-                    Icon(
-                        Icons.Rounded.FilterList,
-                        contentDescription = null,
-                        tint = scheme.onSurfaceVariant,
-                    )
+                    IconButton(onClick = { filtersOpen = !filtersOpen }) {
+                        Icon(
+                            Icons.Rounded.FilterList,
+                            contentDescription = if (filtersOpen) "Hide filters" else "Show filters",
+                            tint = if (narrowed) scheme.primary else scheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -186,8 +239,14 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
                     Chip(option.label, selected = filter == option, onClick = { filter = option })
                 }
                 Chip(
-                    thisMonth.month.getDisplayName(JavaTextStyle.FULL, Locale.getDefault()),
+                    if (range == LedgerRange.Cycle) {
+                        thisMonth.month.getDisplayName(JavaTextStyle.FULL, Locale.getDefault())
+                    } else {
+                        range.label
+                    },
+                    selected = range != LedgerRange.Cycle,
                     leading = Icons.Rounded.CalendarMonth,
+                    onClick = { filtersOpen = true },
                 )
                 Chip(
                     "Tagged",
@@ -198,21 +257,101 @@ fun LedgerScreen(state: LedgerState, onOpenTxn: (String) -> Unit, onGo: (String)
             }
         }
 
+        if (filtersOpen) {
+            item {
+                Plate(Modifier.padding(top = 12.dp), depth = 1) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "How far back",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = scheme.onSurfaceVariant,
+                            )
+                            ChipRow {
+                                LedgerRange.entries.forEach { option ->
+                                    Chip(
+                                        option.label,
+                                        selected = range == option,
+                                        onClick = { range = option },
+                                    )
+                                }
+                            }
+                        }
+
+                        if (state.accounts.size > 1) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "Account",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                                ChipRow {
+                                    Chip(
+                                        "Any",
+                                        selected = accountId == null,
+                                        onClick = { accountId = null },
+                                    )
+                                    state.accounts.forEach { account ->
+                                        Chip(
+                                            account.name,
+                                            selected = accountId == account.id,
+                                            leading = accountIcon(account.kind),
+                                            onClick = { accountId = account.id },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            AmountInput(
+                                minDigits,
+                                { minDigits = it },
+                                label = "At least",
+                                currency = state.baseCurrency,
+                                modifier = Modifier.weight(1f),
+                            )
+                            AmountInput(
+                                maxDigits,
+                                { maxDigits = it },
+                                label = "At most",
+                                currency = state.baseCurrency,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (narrowed) {
+                                Pill("Clear filters", Icons.Rounded.Close, { clearFilters() })
+                            }
+                            Pill("Done", Icons.Rounded.Check, {
+                                filtersOpen = false
+                                focus.clearFocus()
+                            })
+                        }
+                    }
+                }
+            }
+        }
+
         if (days.isEmpty()) {
             item {
                 EmptyWater(
                     title = "Nothing matches",
                     body = if (taggedOnly && query.isBlank()) {
-                        "Nothing this month carries a tag yet. Tags are added when you log or " +
-                            "edit a transaction."
+                        "Nothing in ${range.label.lowercase()} carries a tag yet. Tags are added " +
+                            "when you log or edit a transaction."
+                    } else if (query.isBlank()) {
+                        "Nothing in ${range.label.lowercase()} matches those filters. Widen them, " +
+                            "or clear them and start again."
                     } else {
-                        "No transaction in this month matches \"$query\". Clear the search, or " +
-                            "widen the filter above."
+                        "No transaction in ${range.label.lowercase()} matches \"$query\". Clear " +
+                            "the search, or widen the filters above."
                     },
                     modifier = Modifier.padding(top = 24.dp),
                     actionLabel = "Clear search",
                     actionIcon = Icons.Rounded.Check,
-                    onAction = { query = ""; filter = LedgerFilter.All },
+                    onAction = { query = ""; filter = LedgerFilter.All; clearFilters() },
                 )
             }
         }
@@ -277,6 +416,9 @@ fun TransactionEditorScreen(
     /** What a receipt scan read, if the user arrived that way. */
     prefill: ReceiptGuess? = null,
     onPrefillUsed: () -> Unit = {},
+    /** A saved shape the user tapped in Settings. Fills more of the form than a scan can. */
+    template: Template? = null,
+    onTemplateUsed: () -> Unit = {},
     onBack: () -> Unit,
     onGo: (String) -> Unit = {},
     onSave: (
@@ -317,6 +459,21 @@ fun TransactionEditorScreen(
             guess.totalMinor?.let { digits = it.toString() }
             guess.merchant?.let { merchant = it }
             onPrefillUsed()
+        }
+    }
+
+    // Same once-then-cleared contract as a scan. A template knows the category and the account
+    // as well as the figure, so it fills those too -- and an amount of zero means the template
+    // was saved as "ask me", which leaves the field empty rather than writing a 0.00 in.
+    LaunchedEffect(template) {
+        template?.let { saved ->
+            merchant = saved.merchant
+            if (saved.amountMinor != 0L) digits = saved.amountMinor.absoluteValue.toString()
+            flow = saved.flow
+            pickedCategory = saved.categoryId
+            pickedAccount = saved.accountId
+            saved.note?.let { note = it }
+            onTemplateUsed()
         }
     }
 
@@ -361,7 +518,7 @@ fun TransactionEditorScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            symbolOf("USD"),
+                            symbolOf(if (foreignEntry) pickedCurrency else Accounts[accountId].currency),
                             style = MoneyType.large,
                             color = scheme.onSurfaceVariant,
                         )

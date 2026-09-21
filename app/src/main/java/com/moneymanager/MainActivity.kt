@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.moneymanager.data.ThemeMode
 import androidx.fragment.app.FragmentActivity
 import com.moneymanager.ui.MoneyManagerTheme
 import com.moneymanager.ui.MoneyManagerApp
@@ -43,8 +45,16 @@ class MainActivity : FragmentActivity() {
         if ((application as MoneyApp).security.hideInRecents) {
             window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         }
+        val appearance = (application as MoneyApp).appearance
         setContent {
-            MoneyManagerTheme {
+            MoneyManagerTheme(
+                dark = when (appearance.themeMode) {
+                    ThemeMode.Dark -> true
+                    ThemeMode.Light -> false
+                    ThemeMode.System -> isSystemInDarkTheme()
+                },
+                dynamic = appearance.materialYou,
+            ) {
                 MoneyManagerApp()
             }
         }

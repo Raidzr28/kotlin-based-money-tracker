@@ -45,6 +45,7 @@ import com.moneymanager.data.Accounts
 import com.moneymanager.data.Categories
 import com.moneymanager.data.Flow
 import com.moneymanager.data.Txn
+import com.moneymanager.data.Money
 import com.moneymanager.data.moneyParts
 import kotlin.math.absoluteValue
 
@@ -75,7 +76,7 @@ fun toneFor(flow: Flow, over: Boolean = false): Color {
 fun MoneyText(
     minor: Long,
     modifier: Modifier = Modifier,
-    currency: String = "USD",
+    currency: String = Money.base,
     style: TextStyle = MoneyType.row,
     color: Color = MaterialTheme.colorScheme.onSurface,
     showSign: Boolean = false,
@@ -360,6 +361,27 @@ fun Pill(
         Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
     }
+}
+
+/**
+ * Says a total is short, and why.
+ *
+ * Only ever rendered when a currency on the books has no rate to the base. The alternative --
+ * adding the raw number in and moving on -- produces a figure that looks right and is not, which
+ * is the one thing a money app may never do. Nothing here is an error state: no network is the
+ * normal condition this app is built for.
+ */
+@Composable
+fun ShortTotalNote(currencies: List<String>, base: String, modifier: Modifier = Modifier) {
+    if (currencies.isEmpty()) return
+    val scheme = MaterialTheme.colorScheme
+    Text(
+        "Not counted: " + currencies.joinToString(", ") +
+            ". No rate to $base yet — open Currencies and update.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MoneyTheme.water.alert,
+        modifier = modifier.padding(top = 8.dp),
+    )
 }
 
 /** A short flag: one drawn glyph, one line, one tone. Used for streaks, warnings and states. */

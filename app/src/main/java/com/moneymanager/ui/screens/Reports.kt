@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,8 +30,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.moneymanager.data.LedgerState
 import com.moneymanager.data.ledgerCsv
+import com.moneymanager.data.monthTitle
+import com.moneymanager.data.writeReportPdf
 import com.moneymanager.data.money
+import com.moneymanager.data.cycleStart
 import com.moneymanager.data.thisMonth
+import com.moneymanager.data.weekColumnOf
 import com.moneymanager.ui.icon
 import com.moneymanager.ui.CashFlowGrid
 import com.moneymanager.ui.Chip
@@ -46,6 +51,7 @@ import com.moneymanager.ui.RingChart
 import com.moneymanager.ui.LocalConfirm
 import com.moneymanager.ui.Routes
 import com.moneymanager.ui.SectionHeading
+import com.moneymanager.ui.ShortTotalNote
 import com.moneymanager.ui.Slice
 import com.moneymanager.ui.SoundingLine
 import com.moneymanager.ui.Stat
@@ -81,6 +87,33 @@ fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
         }
         confirm(
             if (written.isSuccess) "Exported ${rows.size} transactions"
+            else "Could not write that file. Try another folder."
+        )
+    }
+    val exportPdf = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val written = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { stream ->
+                writeReportPdf(
+                    out = stream,
+                    title = monthTitle(thisMonth),
+                    currency = state.baseCurrency,
+                    inMinor = state.monthlyIn.lastOrNull() ?: 0L,
+                    outMinor = state.monthlyOut.lastOrNull() ?: 0L,
+                    netWorthMinor = state.netWorthMinor,
+                    spend = state.spendByCategory()
+                        .sortedByDescending { it.second }
+                        .map { it.first.label to it.second },
+                    merchants = state.topMerchants,
+                    transactionCount = state.transactions.size,
+                    incomplete = state.unconvertible,
+                )
+            } ?: error("no stream")
+        }
+        confirm(
+            if (written.isSuccess) "Report saved"
             else "Could not write that file. Try another folder."
         )
     }
@@ -208,6 +241,7 @@ fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
                         )
                     }
                     SoundingLine(state.netWorthAssets, state.netWorthDebts, height = 172.dp)
+                    ShortTotalNote(state.unconvertible, state.baseCurrency)
                 }
             }
         }
@@ -222,7 +256,7 @@ fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
             Plate {
                 CashFlowGrid(
                     daily = state.dailySpend,
-                    firstDayOfWeekOffset = thisMonth.atDay(1).dayOfWeek.value - 1,
+                    firstDayOfWeekOffset = weekColumnOf(cycleStart),
                 )
             }
         }
@@ -296,6 +330,12 @@ fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
                     emphasis = true,
                     enabled = state.allTransactions.isNotEmpty(),
                 )
+                Pill(
+                    "Export PDF",
+                    Icons.Rounded.Description,
+                    { exportPdf.launch("money-manager-${thisMonth.year}-%02d.pdf".format(thisMonth.monthValue)) },
+                    enabled = state.transactions.isNotEmpty(),
+                )
             }
         }
         item {
@@ -303,7 +343,9 @@ fun ReportsScreen(state: LedgerState, onGo: (String) -> Unit) {
                 if (state.allTransactions.isEmpty()) {
                     "There is nothing to export yet."
                 } else {
-                    "Written to the folder you choose, in the same column layout this app " +
+                    "CSV is every transaction, in the same column layout this app reads back. " +
+                        "PDF is this month's summary, for printing or sending on. " +
+                        "Written to the folder you choose, in the same column layout this app " +
                         "imports. Nothing is sent anywhere."
                 },
                 style = MaterialTheme.typography.bodySmall,

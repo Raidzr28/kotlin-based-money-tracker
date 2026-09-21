@@ -1,5 +1,7 @@
 package com.moneymanager.widget
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -149,4 +151,25 @@ private fun WidgetBody(state: LedgerState) {
 
 class MoneyWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = MoneyWidget()
+}
+
+/**
+ * Asks the launcher to place the widget, and says what happened.
+ *
+ * `requestPinAppWidget` is the only way an app can offer this from inside itself, and it needs
+ * API 26 plus a launcher that supports pinning -- a good many do not, and they report it by
+ * returning false rather than by throwing. Both cases get a sentence the user can act on
+ * instead of a tap that appears to do nothing.
+ */
+fun requestPinWidget(context: Context): String {
+    val manager = AppWidgetManager.getInstance(context)
+    val provider = ComponentName(context, MoneyWidgetReceiver::class.java)
+    return when {
+        !manager.isRequestPinAppWidgetSupported ->
+            "This launcher cannot add widgets from inside an app. Long-press the home screen instead."
+        manager.requestPinAppWidget(provider, null, null) ->
+            "Check your home screen to place it."
+        else ->
+            "The launcher turned that down. Long-press the home screen and add it from there."
+    }
 }

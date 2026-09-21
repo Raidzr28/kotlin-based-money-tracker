@@ -58,6 +58,9 @@ Everything in the README's MVP v1, plus most of v2:
 - **Transactions** — add, edit, delete, split across categories, tag, in any currency.
 - **Accounts** — create, transfer between them. A balance is the opening figure plus every
   transaction since, never a stored total.
+- **Assets** — a motorbike, a laptop, a fridge: what it cost, when it was bought, how long it
+  stays worth anything, and an optional warranty date. Straight-line depreciation by whole
+  months, counted into net worth at today's value. Nothing about the value is stored.
 - **Budgets** — a monthly limit per category, with rollover, and three ways of reading the same
   envelopes: envelope, 50/30/20, zero-based.
 - **Bills & subscriptions** — recurring, with local reminders (WorkManager, no server), and
@@ -66,9 +69,32 @@ Everything in the README's MVP v1, plus most of v2:
 - **Reports** — category ring, income against spend, net worth, cash-flow calendar, top
   merchants, all derived from the ledger at read time.
 - **App lock** — PIN (PBKDF2-SHA256, salted, throttled) and biometrics.
-- **Statement import** — CSV from any bank, with column inference and duplicate detection.
+- **Statement import** — CSV or XLSX from any bank, with column inference and duplicate
+  detection. The workbook reader is hand-written against the zip-of-XML that .xlsx is, for the
+  same reason the CSV reader is: a spreadsheet library would weigh more than the whole app.
+- **Ledger search** — text, direction, how far back, account, and an amount band. The rule is
+  `LedgerQuery` in the data layer rather than in the screen, so it can be tested without a device.
+- **Report export** — the whole ledger as CSV, or the month as a PDF for printing or sending
+  on. `android.graphics.pdf` has shipped since API 19, so neither needs a dependency.
 - **Receipt scanning** — on-device OCR that pre-fills a transaction and never posts by itself.
 - **Multi-currency** — off by default; rates from Frankfurter, cached for offline, overridable.
+- **Recurring templates** — a saved transaction shape that fills the editor in one tap. It
+  never posts by itself; see the note under the product rules.
+- **Categories** — rename, re-icon, re-parent, archive. Archived rather than deleted, so a
+  past transaction is never relabelled by a present setting.
+- **Notifications** — bill reminders and an evening streak warning, each with its own
+  switch, each asking for the permission at the toggle.
+- **Periods** — the month can open on the 1st, 15th, 25th or on payday, read as the median
+  day income arrived over the last six months. Every derived figure follows it.
+- **Appearance** — dark, light or follow the system, and Material You as an opt-in.
+- **Round-ups** — the change from every expense, derived from the ledger and swept into a goal
+  only on a tap. Nothing moves on a schedule; the only thing stored is the date of the last sweep.
+- **52-week challenge** — the classic ladder, pinned to the calendar year because this engine
+  stores no start date, and measured against money that actually reached a savings account.
+- **A growing bed** — the README's "avatar/city/plant", grown as kelp so it lives in the design
+  system's own water rather than beside it. Skippable, as the README asks.
+- **Export and erase** — the whole ledger to CSV through the system picker, and a
+  two-tap erase that re-seeds the day-one categories and cash account.
 
 ## What is deliberately not wired
 
@@ -77,12 +103,23 @@ Everything in the README's MVP v1, plus most of v2:
 - **No Vico, no MPAndroidChart.** Every chart is a `Canvas` composable, because the design needs
   a ring with labels on the arc and a mirrored net-worth sounding, and because a chart library
   brings its own house style into a committed visual world.
-- **No Material You.** The depth palette is what makes the waterline legible; a wallpaper-derived
-  scheme reorders it. It is offered as an explicit opt-in in Settings → Appearance.
+- **Material You reaches the Material surfaces and stops there.** Opt-in in Settings →
+  Appearance, off by default. Plates, chips and sheets follow the wallpaper; the water column
+  keeps the authored depth ladder, because those five steps in that order are what make the
+  waterline a reading rather than a decoration.
 - **No date picker when logging.** Everything logs as now; bills and goals do have one.
+- **No leaderboard switch.** Comparing savings rate needs a shared wallet, a shared wallet is
+  Firebase, and Firebase is not started. A toggle storing a preference no server will read is a
+  dead control with a feature's name on it, so the Progress screen says so instead.
+- **No PDF statement import.** CSV and XLSX carry the same rows in a form that can be read
+  exactly; a PDF carries a picture of them. Extracting text needs a library several times the
+  size of this app, and what comes out is a layout to be guessed at rather than columns — which
+  is how an import puts the wrong number in the ledger without anything looking wrong. The
+  import screen says so when a PDF is chosen, and names the two formats that do work.
 - **Gmail import, Drive backup and Firebase sync are not started.** Each needs a Google Cloud or
   Firebase project owned by whoever ships this, with OAuth clients tied to the release signing
-  certificate. There is nothing useful to write until those exist.
+  certificate. There is nothing useful to write until those exist. `SERVICES.md` is the runbook:
+  what to create, what to hand over, and what gets built when it arrives.
 
 ## Permissions, and why there are only two
 
@@ -95,22 +132,61 @@ permission: receipt photos live in the app's own private directory, not in share
 
 ## Verified, and not
 
-**Verified by tests.** 37 unit tests, all passing, over the three places where a silent mistake
-would look like a transaction rather than a bug:
+**Verified by tests.** 176 unit tests, all passing, over the places where a silent mistake would
+look like a transaction rather than a bug:
 
+- `RepositoryWriteTest` (12) — the write paths, against a real database: transfers as a linked
+  pair, cross-currency conversion on both sides, refusal when no rate exists, deleting a
+  transfer's twin, paying a bill, splits charged to their own envelopes.
+- `LedgerStateTest` (30) — every headline figure, including conversion into the base currency.
 - `StatementImportTest` (14) — every amount format a bank writes, CSV quoting, duplicate matching.
-- `RatesTest` (11) — currency conversion, including rounding of negatives and round trips.
+- `ChallengesTest` (20) — derived runs, and what they must refuse to claim.
 - `ReceiptParserTest` (12) — finding the total among the other numbers on a receipt.
+- `RatesTest` (11) — currency conversion, including rounding of negatives and round trips.
+- `NextDueTest` (7) — advancing a bill, including month-end drift and paying early.
+- `LedgerCsvTest` (4) — export quoting and signs, read back through the importer.
 
-Run them with `./gradlew :app:testDebugUnitTest`.
+- `RoundUpTest` (10) — the change from one spend and across the ledger: that an amount already
+  on the boundary yields nothing, that income is never rounded up, that the sweep watermark is
+  exclusive so the same change is not offered twice, and that an unconvertible row is skipped.
+- `XlsxImportTest` (17) — reading a bank's workbook: shared and inline strings, rich-text
+  runs, sparse cells that must not shift a column, and above all the dates, which are plain
+  numbers that only a style says are dates. Workbooks are built in the test rather than checked
+  in, so what is being asserted is readable.
+- `LedgerSearchTest` (11) — the search rule, and especially that an amount band is compared on
+  size: money out is held negative, so a signed comparison would let every expense through an
+  "at least" filter.
+- `AssetTest` (10) — what a possession is worth and when: the day it was bought, a straight
+  line down, nothing after its life is up and never less than nothing, dates before it was
+  owned, a life of zero rather than a division by it, and a house-sized price that must not
+  overflow on the way through.
+
+Two of those suites came with the Settings work:
+
+- `PeriodsTest` (9) — where a cycle opens: the day before the opening, wrapping into the
+  previous year, a derived payday clamped off the 31st, a leap February, and the calendar
+  header rotating rather than being relabelled.
+- `SettingsWriteTest` (9) — templates round-tripping, a rename that does not touch the
+  transactions filed under it, an archive that leaves history alone, and the two erase cases:
+  that it empties the ledger, and that what comes back is usable rather than a database with
+  no categories and no account.
+
+Run them with `./gradlew :app:testDebugUnitTest`. `RepositoryWriteTest` runs Room on the JVM
+through Robolectric, so no device or emulator is needed; its first run downloads an Android
+runtime jar and takes several minutes.
+
+**SQL has a floor.** `minSdk` is 26, and the SQLite that ships with a device is the one that
+shipped with its Android version. `INSERT ... ON CONFLICT DO UPDATE` needs SQLite 3.24, which
+did not arrive until API 30 — it was in `MerchantMemoryDao.remember`, which runs on every
+manually logged transaction, and it threw on Android 8, 9 and 10. Prefer SQL that works at the
+floor; UPDATE-then-INSERT is the portable upsert.
 
 **Verified by the compiler.** AGP 8.7.3, Kotlin 2.0.21, compileSdk 35, minSdk 26. Colour contrast
 was checked numerically: every foreground/background token pair in both schemes clears 4.5:1.
 
-**Not verified at all.** Everything that needs a screen, a database round trip, a camera or a
-network. Specifically: the Room layer has no instrumented tests, so nothing automated would catch
-a migration or query fault; notification delivery, the biometric prompt and OCR accuracy have
-never been exercised. Those are the highest-value things to cover next, in that order, because a
-fault in the data layer corrupts a financial record rather than merely looking wrong.
+**Not verified at all.** Everything that needs a screen, a camera or a network: no UI test has
+ever run, and notification delivery, the biometric prompt and OCR accuracy have never been
+exercised. Room migrations are still uncovered — the write paths are tested, the upgrade path
+between schema versions is not.
 
 Before trusting this with real money, use it for a week with data you would not mind losing.

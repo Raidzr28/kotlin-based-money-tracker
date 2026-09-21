@@ -156,4 +156,89 @@ class ChallengesTest {
     fun `midweek with no budget produces nothing`() {
         assertEquals(emptyList<Challenge>(), challengesFor(emptyList(), saturday.plusDays(3), 0L))
     }
+
+    // --- The 52-week ladder --------------------------------------------------------------------
+
+    /** A transfer landing in a savings account, which is what a goal contribution writes. */
+    private fun intoSavings(date: LocalDate, minor: Long) = Txn(
+        id = "save-$date-$minor",
+        merchant = "Savings",
+        categoryId = "savings",
+        accountId = "savings",
+        amountMinor = minor,
+        date = date,
+        time = LocalTime.NOON,
+        flow = Flow.Transfer,
+    )
+
+    private fun withSavingsAccount(block: () -> Unit) {
+        val before = Accounts.snapshot
+        Accounts.snapshot = listOf(
+            Account("savings", "Savings", AccountKind.Savings, 0L),
+            Account("cash", "Cash", AccountKind.Cash, 0L),
+        )
+        try { block() } finally { Accounts.snapshot = before }
+    }
+
+    /** The Monday of ISO week [week] in [year], so a date lands in a known week. */
+    private fun inWeek(year: Int, week: Int): LocalDate =
+        LocalDate.of(year, 1, 4)
+            .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            .plusWeeks((week - 1).toLong())
+
+    @Test
+    fun `without a savings account there is no ladder to climb`() {
+        // Nothing to measure against, so the challenge does not appear rather than reporting zero.
+        val rows = listOf(out(saturday, 10_00L))
+        assertNull(fiftyTwoWeekChallenge(savedByIsoWeek(rows, saturday.year), saturday, 100L))
+    }
+
+    @Test
+    fun `only money landing in savings counts toward it`() = withSavingsAccount {
+        val week = inWeek(2026, 3)
+        val rows = listOf(out(week, 40_00L), intoSavings(week, 6_00L))
+        assertEquals(mapOf(3 to 6_00L), savedByIsoWeek(rows, 2026))
+    }
+
+    @Test
+    fun `money taken back out of savings nets off against the week it left in`() = withSavingsAccount {
+        val week = inWeek(2026, 3)
+        val rows = listOf(intoSavings(week, 50_00L), intoSavings(week, -40_00L))
+        assertEquals(mapOf(3 to 10_00L), savedByIsoWeek(rows, 2026))
+    }
+
+    @Test
+    fun `the ladder asks for one plus two plus three by week three`() = withSavingsAccount {
+        val today = inWeek(2026, 3).plusDays(2)
+        // 1 + 2 + 3 = 6 units. Saving exactly that is on track.
+        val saved = mapOf(1 to 1_00L, 2 to 2_00L, 3 to 3_00L)
+        val challenge = fiftyTwoWeekChallenge(saved, today, unitMinor = 100L)!!
+        assertEquals(3, challenge.dayOf)
+        assertEquals(52, challenge.days)
+        assertEquals(6_00L, challenge.savedMinor)
+        assertTrue(challenge.blurb.contains("against"))
+    }
+
+    @Test
+    fun `falling short says how far behind rather than how much was saved`() = withSavingsAccount {
+        val today = inWeek(2026, 4).plusDays(1)
+        // The year has asked for 1+2+3+4 = 10 units; only 2 went in.
+        val challenge = fiftyTwoWeekChallenge(mapOf(1 to 2_00L), today, unitMinor = 100L)!!
+        assertTrue(challenge.blurb.contains("behind"))
+        assertEquals(2_00L, challenge.savedMinor)
+    }
+
+    @Test
+    fun `a year with nothing saved claims nothing`() = withSavingsAccount {
+        val today = inWeek(2026, 5)
+        assertNull(fiftyTwoWeekChallenge(mapOf(1 to 0L), today, unitMinor = 100L))
+    }
+
+    @Test
+    fun `weeks after today are not counted yet`() = withSavingsAccount {
+        val today = inWeek(2026, 2).plusDays(1)
+        // Week 40 money exists but the year has not reached it; it must not flatter week 2.
+        val challenge = fiftyTwoWeekChallenge(mapOf(1 to 1_00L, 40 to 500_00L), today, 100L)!!
+        assertEquals(1_00L, challenge.savedMinor)
+    }
 }

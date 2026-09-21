@@ -34,6 +34,7 @@ import com.moneymanager.data.inferColumns
 import com.moneymanager.data.matchDuplicates
 import com.moneymanager.data.money
 import com.moneymanager.data.parseCsv
+import com.moneymanager.data.readXlsx
 import com.moneymanager.data.readRows
 import com.moneymanager.ui.Chip
 import com.moneymanager.ui.ChipRow
@@ -83,16 +84,39 @@ fun ImportScreen(
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         problem = null
+
+        // A spreadsheet is a zip and a CSV is text, so the two are read differently -- but both
+        // come out as rows of strings and everything after this point is shared. The name is the
+        // only hint available: a content URI carries no extension of its own.
+        val name = displayName(context, uri).orEmpty()
+        val spreadsheet = name.endsWith(".xlsx", ignoreCase = true)
+        val pdf = name.endsWith(".pdf", ignoreCase = true)
+
+        if (pdf) {
+            problem = "PDF statements cannot be read yet. Export CSV or XLSX from your bank " +
+                "instead -- both carry the same rows, and neither needs the layout guessed at."
+            return@rememberLauncherForActivityResult
+        }
+
         runCatching {
-            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            if (spreadsheet) {
+                context.contentResolver.openInputStream(uri)?.use { readXlsx(it) }
+            } else {
+                context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { parseCsv(it.readText()) }
+            }
         }.onFailure {
             problem = "That file could not be opened."
-        }.onSuccess { text ->
-            if (text.isNullOrBlank()) {
-                problem = "That file is empty."
+        }.onSuccess { parsed ->
+            if (parsed.isNullOrEmpty()) {
+                problem = if (spreadsheet) {
+                    "That workbook has no readable sheet in it."
+                } else {
+                    "That file is empty."
+                }
                 return@onSuccess
             }
-            val parsed = parseCsv(text)
             if (parsed.size < 2) {
                 problem = "That file has no rows under its header."
                 return@onSuccess
@@ -111,15 +135,25 @@ fun ImportScreen(
             Plate(Modifier.padding(top = 4.dp), depth = 1) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Export CSV from your bank and open it here. The file is read on this " +
-                            "device and nothing is uploaded.",
+                        "Export CSV or XLSX from your bank and open it here. The file is read " +
+                            "on this device and nothing is uploaded.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = scheme.onSurfaceVariant,
                     )
                     Pill(
                         if (rows.isEmpty()) "Choose a file" else "Choose a different file",
                         Icons.Rounded.Description,
-                        { pick.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")) },
+                        {
+                            pick.launch(
+                                arrayOf(
+                                    "text/csv",
+                                    "text/comma-separated-values",
+                                    "text/plain",
+                                    XLSX_MIME,
+                                    "*/*",
+                                )
+                            )
+                        },
                         emphasis = rows.isEmpty(),
                     )
                 }
@@ -311,3 +345,15 @@ private fun CandidateRow(candidate: ImportCandidate, onInclude: (Boolean) -> Uni
         }
     }
 }
+
+/** What the picker called the file. The only way to tell a workbook from a CSV before opening it. */
+private fun displayName(context: android.content.Context, uri: Uri): String? =
+    runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+        }
+    }.getOrNull()
+
+private const val XLSX_MIME =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

@@ -35,6 +35,13 @@ android {
 
     buildFeatures { compose = true }
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+    }
+
     // The schema is checked in so migrations can be written against a known previous version
     // rather than guessed at.
     ksp { arg("room.schemaLocation", "$projectDir/schemas") }
@@ -73,5 +80,9 @@ dependencies {
     testImplementation(libs.junit)
     // Androids org.json is a stub on the JVM; unit tests need a real one.
     testImplementation(libs.json.jvm)
+    // Room needs Android's SQLite. Robolectric supplies it on the JVM, so the write paths that
+    // move real money can be tested with `gradlew test` and no device attached.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
     debugImplementation(libs.androidx.ui.tooling)
 }

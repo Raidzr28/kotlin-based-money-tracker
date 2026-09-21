@@ -1,6 +1,7 @@
 package com.moneymanager.data
 
 import com.moneymanager.data.db.AccountEntity
+import com.moneymanager.data.db.AssetEntity
 import com.moneymanager.data.db.BillEntity
 import com.moneymanager.data.db.BudgetEntity
 import com.moneymanager.data.db.CategoryEntity
@@ -9,6 +10,7 @@ import com.moneymanager.data.db.GoalEntity
 import com.moneymanager.data.db.MoneyDatabase
 import com.moneymanager.data.db.SplitEntity
 import com.moneymanager.data.db.TagEntity
+import com.moneymanager.data.db.TemplateEntity
 import com.moneymanager.data.db.TxnEntity
 import com.moneymanager.data.db.TxnWithDetails
 import kotlinx.coroutines.flow.combine
@@ -38,8 +40,34 @@ data class LedgerState(
     val bills: List<Bill> = emptyList(),
     val goals: List<Goal> = emptyList(),
     val debts: List<Debt> = emptyList(),
+    val assets: List<Asset> = emptyList(),
+    val conversion: Conversion = Conversion(),
     val loading: Boolean = true,
 ) {
+
+    // --- One currency out ------------------------------------------------------------------------
+
+    /*
+     * Accounts and the rows on them are kept in their own currencies; every total below is in the
+     * base. Anything with no rate to the base is left out of the sum rather than added in raw,
+     * and named in [unconvertible] so a screen can say the total is short rather than quietly
+     * presenting a wrong one.
+     */
+
+    private fun Txn.baseMinor(): Long? = conversion.toBase(amountMinor, currency)
+    private fun Account.baseMinor(): Long? = conversion.toBase(balanceMinor, currency)
+
+    val baseCurrency: String get() = conversion.base
+
+    /** Currencies on the books that no rate reaches. Empty in the ordinary single-currency case. */
+    val unconvertible: List<String> =
+        (accounts.map { it.currency } + allTransactions.map { it.currency } +
+            bills.map { it.currency } + debts.map { it.currency } + assets.map { it.currency })
+            .distinct()
+            .filterNot { conversion.canConvert(it) }
+            .sorted()
+
+    val totalsAreComplete: Boolean get() = unconvertible.isEmpty()
     // --- The month -------------------------------------------------------------------------------
 
     val budgetedMinor = budgets.sumOf { it.limitMinor }
@@ -47,8 +75,8 @@ data class LedgerState(
 
     /** Bills still to be paid this month. Committed money is not safe to spend. */
     val committedMinor = bills
-        .filter { it.due >= today && YearMonth.from(it.due) == thisMonth }
-        .sumOf { it.amountMinor }
+        .filter { it.due >= today && it.due <= cycleEnd }
+        .sumOf { conversion.toBase(it.amountMinor, it.currency) ?: 0L }
 
     val safeToSpendMinor = (budgetedMinor - spentMinor - committedMinor).coerceAtLeast(0)
 
@@ -60,7 +88,7 @@ data class LedgerState(
 
     val liquidMinor = accounts
         .filter { it.kind != AccountKind.Savings && it.balanceMinor > 0 }
-        .sumOf { it.balanceMinor }
+        .sumOf { it.baseMinor() ?: 0L }
 
     val todaysTransactions get() = transactions.filter { it.date == today }
     val loggedToday get() = todaysTransactions.isNotEmpty()
@@ -69,9 +97,18 @@ data class LedgerState(
 
     // --- Net worth -------------------------------------------------------------------------------
 
-    private val assetsNow = accounts.filter { it.balanceMinor >= 0 }.sumOf { it.balanceMinor }
-    private val owedNow = accounts.filter { it.balanceMinor < 0 }.sumOf { -it.balanceMinor } +
-        debts.sumOf { it.balanceMinor }
+    private val inAccountsNow = accounts.filter { it.balanceMinor >= 0 }.sumOf { it.baseMinor() ?: 0L }
+    private val owedNow = accounts.filter { it.balanceMinor < 0 }.sumOf { -(it.baseMinor() ?: 0L) } +
+        debts.sumOf { conversion.toBase(it.balanceMinor, it.currency) ?: 0L }
+
+    /** What the tracked possessions are worth on [date], in the base currency. */
+    private fun ownedOn(date: LocalDate): Long =
+        assets.sumOf { conversion.toBase(it.valueOn(date), it.currency) ?: 0L }
+
+    /** What every tracked possession is worth today. Shown beside the accounts. */
+    val assetsMinor: Long get() = ownedOn(today)
+
+    private val assetsNow = inAccountsNow + assetsMinor
 
     val netWorthMinor = assetsNow - owedNow
 
@@ -81,20 +118,23 @@ data class LedgerState(
      * history instead of a decorative curve.
      */
     private val netWorthSeries: Pair<List<Long>, List<Long>> = run {
-        val assets = ArrayDeque<Long>()
+        val owned = ArrayDeque<Long>()
         val owed = ArrayDeque<Long>()
-        var a = assetsNow
-        var o = owedNow
+        var inAccounts = inAccountsNow
+        val o = owedNow
         var month = thisMonth
         repeat(12) {
-            assets.addFirst(a)
+            // Possessions are valued at that month's end rather than carried back at today's
+            // figure. A laptop bought in March was not on the books in January, and in April it
+            // was worth more than it is now -- carrying one number backwards would credit the
+            // user with both.
+            owned.addFirst(inAccounts + ownedOn(month.atEndOfMonth()))
             owed.addFirst(o)
             val inMonth = allTransactions.filter { YearMonth.from(it.date) == month }
-            val delta = inMonth.sumOf { it.amountMinor }
-            a -= delta
+            inAccounts -= inMonth.sumOf { it.baseMinor() ?: 0L }
             month = month.minusMonths(1)
         }
-        assets.toList() to owed.toList()
+        owned.toList() to owed.toList()
     }
 
     val netWorthAssets: List<Long> get() = netWorthSeries.first
@@ -108,25 +148,36 @@ data class LedgerState(
 
     val monthlyIn: List<Long> get() = recentMonths.map { m ->
         allTransactions.filter { YearMonth.from(it.date) == m && it.flow == Flow.In }
-            .sumOf { it.amountMinor }
+            .sumOf { it.baseMinor() ?: 0L }
     }
 
     val monthlyOut: List<Long> get() = recentMonths.map { m ->
         allTransactions.filter { YearMonth.from(it.date) == m && it.flow == Flow.Out }
-            .sumOf { it.amountMinor.absoluteValue }
+            .sumOf { it.baseMinor()?.absoluteValue ?: 0L }
     }
 
-    /** Spend per day of the current month so far, for the cash-flow heatmap. */
-    val dailySpend: List<Long> get() = (1..daysInMonth).map { day ->
-        transactions
-            .filter { it.date.dayOfMonth == day && it.flow == Flow.Out }
-            .sumOf { it.amountMinor.absoluteValue }
+    /**
+     * Spend per day of the current cycle so far, for the cash-flow heatmap.
+     *
+     * Indexed from the cycle's opening day rather than the calendar's, so a month that starts on
+     * the 25th fills its grid from the 25th instead of leaving three weeks blank.
+     */
+    val dailySpend: List<Long> get() {
+        val start = cycleStart
+        return (0 until daysInMonth).map { offset ->
+            val day = start.plusDays(offset.toLong())
+            transactions
+                .filter { it.date == day && it.flow == Flow.Out }
+                .sumOf { it.baseMinor()?.absoluteValue ?: 0L }
+        }
     }
 
     val topMerchants: List<MerchantTotal> get() = transactions
         .filter { it.flow == Flow.Out }
         .groupBy { it.merchant }
-        .map { (name, rows) -> MerchantTotal(name, rows.sumOf { it.amountMinor.absoluteValue }, rows.size) }
+        .map { (name, rows) ->
+            MerchantTotal(name, rows.sumOf { it.baseMinor()?.absoluteValue ?: 0L }, rows.size)
+        }
         .sortedByDescending { it.totalMinor }
         .take(5)
 
@@ -136,8 +187,11 @@ data class LedgerState(
     fun spendByCategory(): List<Pair<Category, Long>> = transactions
         .filter { it.flow == Flow.Out }
         .flatMap { t ->
-            if (t.splits.isEmpty()) listOf(t.categoryId to t.amountMinor)
+            val parts = if (t.splits.isEmpty()) listOf(t.categoryId to t.amountMinor)
             else t.splits.map { it.categoryId to it.amountMinor }
+            parts.mapNotNull { (id, minor) ->
+                conversion.toBase(minor, t.currency)?.let { id to it }
+            }
         }
         .groupBy({ it.first }, { it.second })
         .map { (id, amounts) -> Categories[id] to amounts.sumOf { it.absoluteValue } }
@@ -187,10 +241,20 @@ data class LedgerState(
      */
     val evenPaceMinor = if (daysInMonth == 0) 0L else budgetedMinor / daysInMonth
 
-    val challenges: List<Challenge> get() = challengesFor(allTransactions, today, evenPaceMinor)
+    val challenges: List<Challenge> get() =
+        challengesFor(allTransactions, today, evenPaceMinor, conversion)
 }
 
-class MoneyRepository(private val db: MoneyDatabase) {
+class MoneyRepository(
+    private val db: MoneyDatabase,
+    private val rates: RatesStore,
+    /**
+     * Where the user's month begins. Defaults to the calendar, which is what a test that does
+     * not care about cycles wants, and what an install that has never opened Settings gets.
+     */
+    private val periodSettings: kotlinx.coroutines.flow.Flow<PeriodSettings> =
+        kotlinx.coroutines.flow.flowOf(PeriodSettings()),
+) {
 
     private val txnDao = db.txns()
 
@@ -224,32 +288,51 @@ class MoneyRepository(private val db: MoneyDatabase) {
         db.bills().observeAll(),
         db.goals().observeAll(),
         db.debts().observeAll(),
-    ) { budgets, bills, goals, debts -> Plans(budgets, bills, goals, debts) }
+        db.assets().observeAll(),
+    ) { budgets, bills, goals, debts, assets -> Plans(budgets, bills, goals, debts, assets) }
 
     private data class Plans(
         val budgets: List<BudgetEntity>,
         val bills: List<BillEntity>,
         val goals: List<GoalEntity>,
         val debts: List<DebtEntity>,
+        val assets: List<AssetEntity>,
     )
 
     val state: kotlinx.coroutines.flow.Flow<LedgerState> = combine(
         reference,
         txnDao.observeAll(),
         plans,
-    ) { (categories, accounts), rows, p ->
+        // A fourth source, and the reason the base currency is no longer a setting that changes
+        // nothing: picking one re-emits the whole ledger converted into it.
+        rates.conversion,
+        // A fifth, for the same reason: moving the start of the month has to move every figure
+        // derived from it, not just the one stored preference.
+        periodSettings,
+    ) { (categories, accounts), rows, p, conversion, periods ->
+        Periods.monthStartDay = periods.monthStartDay
+        Periods.weekStart = periods.weekStart
         val all = rows.map { it.toDomain() }
-        val month = thisMonth
-        val inMonth = all.filter { YearMonth.from(it.date) == month }
-        val period = month.periodKey()
+        // A payday cycle has to know payday before the cycle bounds mean anything, and payday is
+        // read off the ledger -- so it is resolved here, on the same emission, before any of the
+        // derived figures below are computed.
+        Periods.paydayDay = paydayFrom(all)
+        val start = cycleStart
+        val end = cycleEnd
+        val inMonth = all.filter { it.date >= start && it.date <= end }
+        val period = thisMonth.periodKey()
 
         // What has actually been spent against each envelope, splits attributed to their own
         // categories rather than to the parent transaction's.
+        // Budgets are set in the base currency, so spend against them has to arrive in it.
         val spend = inMonth
             .filter { it.flow == Flow.Out }
             .flatMap { t ->
-                if (t.splits.isEmpty()) listOf(t.categoryId to t.amountMinor.absoluteValue)
-                else t.splits.map { it.categoryId to it.amountMinor.absoluteValue }
+                val parts = if (t.splits.isEmpty()) listOf(t.categoryId to t.amountMinor)
+                else t.splits.map { it.categoryId to it.amountMinor }
+                parts.mapNotNull { (id, minor) ->
+                    conversion.toBase(minor, t.currency)?.let { id to it.absoluteValue }
+                }
             }
             .groupBy({ it.first }, { it.second })
             .mapValues { (_, v) -> v.sum() }
@@ -274,7 +357,21 @@ class MoneyRepository(private val db: MoneyDatabase) {
                 Goal(it.id, it.name, it.targetMinor, it.savedMinor,
                     LocalDate.ofEpochDay(it.byEpochDay), it.accountId, it.imagePath)
             },
-            debts = p.debts.map { Debt(it.id, it.name, it.balanceMinor, it.aprBasisPoints, it.minimumMinor) },
+            debts = p.debts.map {
+                Debt(it.id, it.name, it.balanceMinor, it.aprBasisPoints, it.minimumMinor, it.accountId)
+            },
+            assets = p.assets.map {
+                Asset(
+                    id = it.id,
+                    name = it.name,
+                    costMinor = it.costMinor,
+                    boughtOn = LocalDate.ofEpochDay(it.boughtEpochDay),
+                    usefulLifeMonths = it.usefulLifeMonths,
+                    warrantyUntil = it.warrantyUntilEpochDay?.let(LocalDate::ofEpochDay),
+                    accountId = it.accountId,
+                )
+            },
+            conversion = conversion,
             loading = false,
         )
     }
@@ -346,6 +443,27 @@ class MoneyRepository(private val db: MoneyDatabase) {
      * balance in the app is the sum of that account's rows. Both are flagged Transfer, which is
      * what keeps them out of income and expense totals while still moving the balances.
      */
+    /**
+     * The same amount of money, said in another account's currency. Null when no rate says it.
+     *
+     * Every write below that moves money out of one currency context and into another goes
+     * through this. Before it existed, a transfer wrote the same number on both sides and tagged
+     * each with its own account's currency, which turned a hundred dollars into a hundred euros
+     * on the way across.
+     */
+    private fun crossCurrency(amountMinor: Long, from: String, to: String): Long? {
+        if (from == to) return amountMinor
+        val table = rates.conversion.value.rates ?: return null
+        return convertMinor(amountMinor, from, to, table)
+    }
+
+    /**
+     * Moves money between two accounts as a linked pair of rows.
+     *
+     * Returns false without writing anything when the two accounts are in different currencies
+     * and no rate connects them. Refusing is the only honest option: a half-written transfer, or
+     * one written at a guessed rate, is worse than one the user is told did not happen.
+     */
     suspend fun transfer(
         fromAccountId: String,
         toAccountId: String,
@@ -353,13 +471,14 @@ class MoneyRepository(private val db: MoneyDatabase) {
         date: LocalDate = today,
         time: LocalTime = LocalTime.now(),
         note: String? = null,
-    ) {
-        if (fromAccountId == toAccountId || amountMinor <= 0L) return
+    ): Boolean {
+        if (fromAccountId == toAccountId || amountMinor <= 0L) return false
         val amount = amountMinor.absoluteValue
-        val outId = UUID.randomUUID().toString()
-        val inId = UUID.randomUUID().toString()
         val from = Accounts[fromAccountId]
         val to = Accounts[toAccountId]
+        val credited = crossCurrency(amount, from.currency, to.currency) ?: return false
+        val outId = UUID.randomUUID().toString()
+        val inId = UUID.randomUUID().toString()
         val stamp = System.currentTimeMillis() / 1000
 
         fun row(id: String, pair: String, accountId: String, signed: Long, label: String) = TxnEntity(
@@ -378,7 +497,8 @@ class MoneyRepository(private val db: MoneyDatabase) {
         )
 
         txnDao.save(row(outId, inId, fromAccountId, -amount, "To ${to.name}"), emptyList(), emptyList())
-        txnDao.save(row(inId, outId, toAccountId, amount, "From ${from.name}"), emptyList(), emptyList())
+        txnDao.save(row(inId, outId, toAccountId, credited, "From ${from.name}"), emptyList(), emptyList())
+        return true
     }
 
     /**
@@ -420,6 +540,123 @@ class MoneyRepository(private val db: MoneyDatabase) {
         val pair = txnDao.pairIdOf(id)
         txnDao.deleteById(id)
         if (pair != null) txnDao.deleteById(pair)
+    }
+
+    /**
+     * The day of the month money tends to arrive, for a cycle pinned to payday.
+     *
+     * The median day-of-month of income logged in the last six months. A median rather than the
+     * latest, because a salary that lands on the Friday before a weekend moves by a day or two
+     * and the cycle should not follow it; and rather than the mean, because one refund on the
+     * 2nd should not drag a 25th payday down to the 14th.
+     *
+     * ponytail: one payday a month. Someone paid fortnightly gets whichever half the median
+     * lands in; a real biweekly cycle would need its own recurrence rather than a day number.
+     */
+    private fun paydayFrom(all: List<Txn>): Int {
+        if (Periods.monthStartDay != Periods.PAYDAY) return Periods.paydayDay
+        val since = today.minusMonths(6)
+        val days = all
+            .filter { it.flow == Flow.In && it.date >= since }
+            .map { it.date.dayOfMonth }
+            .sorted()
+        // Two rows is the least that can show a pattern rather than a one-off.
+        return if (days.size < 2) 1 else days[days.size / 2]
+    }
+
+    // --- Assets ------------------------------------------------------------------------------
+
+    suspend fun upsertAsset(asset: Asset) = db.assets().upsert(
+        AssetEntity(
+            id = asset.id.ifEmpty { UUID.randomUUID().toString() },
+            name = asset.name,
+            costMinor = asset.costMinor,
+            boughtEpochDay = asset.boughtOn.toEpochDay(),
+            usefulLifeMonths = asset.usefulLifeMonths,
+            warrantyUntilEpochDay = asset.warrantyUntil?.toEpochDay(),
+            accountId = asset.accountId,
+        )
+    )
+
+    /**
+     * Stops tracking a possession.
+     *
+     * Only the record goes. Whatever transaction paid for it stays exactly where it was: the
+     * money did leave the account, and deleting the note that it became a thing must not rewrite
+     * that. Net worth drops by what it was worth, which is what selling or losing it means.
+     */
+    suspend fun deleteAsset(id: String) = db.assets().deleteById(id)
+
+    // --- Templates ---------------------------------------------------------------------------
+
+    val templates: kotlinx.coroutines.flow.Flow<List<Template>> =
+        db.templates().observeAll().map { rows ->
+            rows.map {
+                Template(
+                    id = it.id,
+                    name = it.name,
+                    amountMinor = it.amountMinor,
+                    merchant = it.merchant,
+                    categoryId = it.categoryId,
+                    accountId = it.accountId,
+                    note = it.note,
+                    sortOrder = it.sortOrder,
+                )
+            }
+        }
+
+    suspend fun upsertTemplate(template: Template) = db.templates().upsert(
+        TemplateEntity(
+            id = template.id.ifEmpty { UUID.randomUUID().toString() },
+            name = template.name,
+            amountMinor = template.amountMinor,
+            merchant = template.merchant,
+            categoryId = template.categoryId,
+            accountId = template.accountId,
+            note = template.note,
+            sortOrder = template.sortOrder,
+        )
+    )
+
+    suspend fun deleteTemplate(id: String) = db.templates().deleteById(id)
+
+    // --- Categories --------------------------------------------------------------------------
+
+    suspend fun upsertCategory(category: Category, sortOrder: Int) = db.categories().upsert(
+        CategoryEntity(
+            id = category.id.ifEmpty { UUID.randomUUID().toString() },
+            label = category.label,
+            iconKey = category.iconKey,
+            parentId = category.parent,
+            sortOrder = sortOrder,
+            archived = false,
+        )
+    )
+
+    /**
+     * Hides a category without deleting it.
+     *
+     * Every transaction ever filed under it still names it, so removing the row would leave
+     * those rows pointing at nothing and silently relabel history as "Uncategorised". Archiving
+     * takes it out of every picker and leaves the past intact.
+     */
+    suspend fun archiveCategory(id: String) {
+        val existing = db.categories().byId(id) ?: return
+        db.categories().upsert(existing.copy(archived = true))
+    }
+
+    // --- Everything --------------------------------------------------------------------------
+
+    /**
+     * Erases the user's whole ledger, then puts back the day-one categories and cash account.
+     *
+     * `clearAllTables` empties every table including `categories` and `accounts`, and the Room
+     * seed callback only fires on create -- so without re-seeding, the app would come back with
+     * no categories to file anything under and nowhere to put it.
+     */
+    suspend fun deleteEverything() {
+        db.clearAllTables()
+        MoneyDatabase.Seed.reseed(db)
     }
 
     suspend fun suggestCategory(merchant: String): String? =
@@ -504,6 +741,7 @@ class MoneyRepository(private val db: MoneyDatabase) {
             balanceMinor = debt.balanceMinor,
             aprBasisPoints = debt.aprBasisPoints,
             minimumMinor = debt.minimumMinor,
+            accountId = debt.accountId,
         )
     )
 
@@ -519,13 +757,26 @@ class MoneyRepository(private val db: MoneyDatabase) {
      * and this only earmarks it, so no transaction is invented to describe something that did not
      * happen.
      */
-    suspend fun contributeToGoal(goalId: String, fromAccountId: String, amountMinor: Long) {
-        if (amountMinor <= 0L) return
-        val goal = db.goals().byId(goalId) ?: return
+    /**
+     * Puts money into a goal, and returns false without writing when it cannot be converted.
+     *
+     * [GoalEntity.savedMinor] is held in the goal's own account's currency, so an amount sent
+     * from elsewhere has to arrive in that currency before it is added. Adding the source figure
+     * would credit the goal with whatever number the other account happened to use.
+     */
+    suspend fun contributeToGoal(goalId: String, fromAccountId: String, amountMinor: Long): Boolean {
+        if (amountMinor <= 0L) return false
+        val goal = db.goals().byId(goalId) ?: return false
+        val goalCurrency = Accounts.currencyOf(goal.accountId)
+        val fromCurrency =
+            if (fromAccountId.isEmpty()) goalCurrency else Accounts.currencyOf(fromAccountId)
+        val credited = crossCurrency(amountMinor, fromCurrency, goalCurrency) ?: return false
+
         if (fromAccountId.isNotEmpty() && fromAccountId != goal.accountId) {
-            transfer(fromAccountId, goal.accountId, amountMinor)
+            if (!transfer(fromAccountId, goal.accountId, amountMinor)) return false
         }
-        db.goals().upsert(goal.copy(savedMinor = goal.savedMinor + amountMinor))
+        db.goals().upsert(goal.copy(savedMinor = goal.savedMinor + credited))
+        return true
     }
 
     /**
@@ -535,9 +786,22 @@ class MoneyRepository(private val db: MoneyDatabase) {
      * instead of consuming it -- counting it as spending would make every month you pay down a
      * loan look like a month you overspent.
      */
-    suspend fun payDebt(debtId: String, fromAccountId: String, amountMinor: Long) {
-        if (amountMinor <= 0L) return
-        val debt = db.debts().byId(debtId) ?: return
+    /**
+     * Records a payment against a debt, and returns false without writing when it cannot convert.
+     *
+     * The money leaves [fromAccountId] in that account's currency, but the balance owed is in the
+     * debt's own. Subtracting the raw figure would clear a debt with the wrong amount of money --
+     * paying 100 EUR off a 100 USD debt would settle it exactly, having handed over more.
+     */
+    suspend fun payDebt(debtId: String, fromAccountId: String, amountMinor: Long): Boolean {
+        if (amountMinor <= 0L) return false
+        val debt = db.debts().byId(debtId) ?: return false
+        val paid = crossCurrency(
+            amountMinor,
+            Accounts.currencyOf(fromAccountId),
+            Accounts.currencyOf(debt.accountId),
+        ) ?: return false
+
         saveTransaction(
             merchant = debt.name,
             categoryId = "savings",
@@ -547,8 +811,9 @@ class MoneyRepository(private val db: MoneyDatabase) {
             learn = false,
         )
         db.debts().upsert(
-            debt.copy(balanceMinor = (debt.balanceMinor - amountMinor).coerceAtLeast(0L))
+            debt.copy(balanceMinor = (debt.balanceMinor - paid).coerceAtLeast(0L))
         )
+        return true
     }
 
     suspend fun upsertCategory(category: Category) = db.categories().upsert(

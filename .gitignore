@@ -53,3 +53,6 @@ UI sample/
 # gradlew, gradlew.bat
 # .impeccable/        Design system record and asset provenance. Small, and it documents where
 #                     every shipped image came from.
+
+# Identifies your Firebase project, and the keys you sign with. See SERVICES.md.
+app/google-services.json

@@ -40,6 +40,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +69,7 @@ import androidx.navigation.navArgument
 import com.moneymanager.MoneyApp
 import com.moneymanager.MoneyViewModel
 import com.moneymanager.data.AppPrefs
+import com.moneymanager.data.Accounts
 import com.moneymanager.data.LedgerState
 import com.moneymanager.data.money
 import com.moneymanager.data.RatesStore
@@ -90,6 +93,14 @@ import com.moneymanager.ui.screens.ScanScreen
 import com.moneymanager.ui.screens.RewardsScreen
 import com.moneymanager.ui.screens.SecurityScreen
 import com.moneymanager.ui.screens.SettingsScreen
+import com.moneymanager.AppearanceState
+import com.moneymanager.data.ledgerCsv
+import com.moneymanager.data.scheduleReminders
+import com.moneymanager.data.scheduleStreakWarnings
+import com.moneymanager.ui.screens.CategoriesScreen
+import com.moneymanager.ui.screens.NotificationsScreen
+import com.moneymanager.ui.screens.TemplatesScreen
+import com.moneymanager.widget.requestPinWidget
 import com.moneymanager.ui.screens.SyncScreen
 import com.moneymanager.ui.screens.TransactionDetailScreen
 import com.moneymanager.ui.screens.TransactionEditorScreen
@@ -130,6 +141,9 @@ object Routes {
     const val SECURITY = "security"
     const val SYNC = "sync"
     const val SETTINGS = "settings"
+    const val NOTIFICATIONS = "settings/notifications"
+    const val TEMPLATES = "settings/templates"
+    const val CATEGORIES = "settings/categories"
 
     fun txn(id: String) = "txn/$id"
     fun txnEdit(id: String) = "txn/$id/edit"
@@ -155,6 +169,18 @@ val LocalConfirm = staticCompositionLocalOf<(String) -> Unit> { {} }
  * screen has to mean it: passing an undo is a promise the action is reversible.
  */
 val LocalUndo = staticCompositionLocalOf<(String, () -> Unit) -> Unit> { { _, _ -> } }
+
+/*
+ * What to say when a write is refused for want of a rate. Not an error: no network is the normal
+ * condition this app is built for, and the fix is one tap away on the Currencies screen.
+ */
+private const val noRate = "No exchange rate for that yet. Update rates in Currencies."
+
+private fun noRateBetween(fromAccountId: String, toAccountId: String): String {
+    val from = Accounts.currencyOf(fromAccountId)
+    val to = Accounts.currencyOf(toAccountId)
+    return "No rate between $from and $to yet. Update rates in Currencies."
+}
 
 data class Tab(val route: String, val label: String, val icon: ImageVector)
 
@@ -255,6 +281,7 @@ fun MoneyManagerApp() {
                         state = state,
                         security = security,
                         prefs = prefs,
+                        appearance = app.appearance,
                         rates = rates,
                         onLockNow = { locked = true },
                         modifier = Modifier
@@ -349,6 +376,7 @@ private fun MoneyNavHost(
     state: LedgerState,
     security: SecurityStore,
     prefs: AppPrefs,
+    appearance: AppearanceState,
     rates: RatesStore,
     onLockNow: () -> Unit,
     modifier: Modifier,
@@ -405,11 +433,14 @@ private fun MoneyNavHost(
 
         composable(Routes.TXN_NEW) {
             val pending by vm.pendingScan.collectAsState()
+            val pendingTemplate by vm.pendingTemplate.collectAsState()
             TransactionEditorScreen(
                 state = state,
                 rates = rates,
                 prefill = pending,
                 onPrefillUsed = vm::consumeScan,
+                template = pendingTemplate,
+                onTemplateUsed = vm::consumeTemplate,
                 onBack = nav::popBackStack,
                 onGo = nav::navigate,
                 onSave = { id, merchant, categoryId, accountId, amountMinor, flow, note, foreign ->
@@ -506,10 +537,16 @@ private fun MoneyNavHost(
                 state = state,
                 onBack = nav::popBackStack,
                 onOpenAccount = { nav.navigate(Routes.account(it)) },
-                onSaveAccount = { name, kind, opening, limit ->
-                    vm.saveAccount(name, kind, opening, limit)
+                onSaveAccount = { name, kind, opening, limit, currency ->
+                    vm.saveAccount(name, kind, opening, limit, currency = currency)
                 },
-                onTransfer = { from, to, amount -> vm.transfer(from, to, amount) },
+                onTransfer = { from, to, amount ->
+                    vm.transfer(from, to, amount) { ok ->
+                        confirm(if (ok) "Transferred" else noRateBetween(from, to))
+                    }
+                },
+                onSaveAsset = vm::saveAsset,
+                onDeleteAsset = vm::deleteAsset,
             )
         }
         composable(
@@ -534,7 +571,7 @@ private fun MoneyNavHost(
                     vm.payBill(id)
                     confirm(
                         if (bill == null) "Marked paid"
-                        else "Logged ${money(bill.amountMinor)} for ${bill.name}"
+                        else "Logged ${money(bill.amountMinor, bill.currency)} for ${bill.name}"
                     )
                 },
             )
@@ -545,7 +582,11 @@ private fun MoneyNavHost(
                 onBack = nav::popBackStack,
                 onGo = nav::navigate,
                 onSaveGoal = vm::saveGoal,
-                onContribute = vm::contributeToGoal,
+                onContribute = { goalId, from, amount ->
+                    vm.contributeToGoal(goalId, from, amount) { ok ->
+                        confirm(if (ok) "Added to the goal" else noRate)
+                    }
+                },
             )
         }
         composable(Routes.DEBT) {
@@ -553,7 +594,11 @@ private fun MoneyNavHost(
                 state = state,
                 onBack = nav::popBackStack,
                 onSaveDebt = vm::saveDebt,
-                onPayDebt = vm::payDebt,
+                onPayDebt = { debtId, from, amount ->
+                    vm.payDebt(debtId, from, amount) { ok ->
+                        confirm(if (ok) "Payment recorded" else noRate)
+                    }
+                },
             )
         }
         composable(Routes.CAPTURE) {
@@ -582,7 +627,21 @@ private fun MoneyNavHost(
                 },
             )
         }
-        composable(Routes.REWARDS) { RewardsScreen(state, onBack = nav::popBackStack) }
+        composable(Routes.REWARDS) {
+            val confirm = LocalConfirm.current
+            RewardsScreen(
+                state = state,
+                prefs = prefs,
+                onBack = nav::popBackStack,
+                onSweep = { goalId, amount ->
+                    // Straight through contributeToGoal, so a sweep is an ordinary goal
+                    // contribution and shows up in the ledger like any other.
+                    vm.contributeToGoal(goalId, "", amount) { ok ->
+                        confirm(if (ok) "Swept into your goal" else noRate)
+                    }
+                },
+            )
+        }
         composable(Routes.CURRENCY) { CurrencyScreen(rates, onBack = nav::popBackStack) }
         composable(Routes.SECURITY) {
             SecurityScreen(
@@ -592,11 +651,76 @@ private fun MoneyNavHost(
             )
         }
         composable(Routes.SYNC) { SyncScreen(onBack = nav::popBackStack) }
+        composable(Routes.NOTIFICATIONS) {
+            val context = LocalContext.current
+            NotificationsScreen(
+                prefs = prefs,
+                onBack = nav::popBackStack,
+                // Re-armed on every change rather than on leaving the screen: WorkManager
+                // replaces the existing request, and a user who changes the hour and then
+                // force-stops the app should still get the reminder at the hour they picked.
+                onReschedule = {
+                    scheduleReminders(context, prefs)
+                    scheduleStreakWarnings(context, prefs)
+                },
+            )
+        }
+        composable(Routes.TEMPLATES) {
+            val templates by vm.templates.collectAsState()
+            TemplatesScreen(
+                templates = templates,
+                onBack = nav::popBackStack,
+                onUse = { template ->
+                    // Straight into the ordinary editor, pre-filled. Nothing is written here.
+                    vm.offerTemplate(template)
+                    nav.navigate(Routes.TXN_NEW)
+                },
+                onSave = vm::saveTemplate,
+                onDelete = vm::deleteTemplate,
+            )
+        }
+        composable(Routes.CATEGORIES) {
+            CategoriesScreen(
+                categories = state.categories,
+                onBack = nav::popBackStack,
+                onSave = vm::saveCategory,
+                onArchive = vm::archiveCategory,
+            )
+        }
         composable(Routes.SETTINGS) {
+            val context = LocalContext.current
+            val confirm = LocalConfirm.current
+            val templates by vm.templates.collectAsState()
+            val exportAll = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("text/csv")
+            ) { uri ->
+                if (uri != null) {
+                    val rows = state.allTransactions
+                    val written = runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use {
+                            it.write(ledgerCsv(rows).toByteArray())
+                        } ?: error("no stream")
+                    }
+                    confirm(
+                        if (written.isSuccess) "Exported " + rows.size + " transactions"
+                        else "Could not write that file. Try another folder."
+                    )
+                }
+            }
             SettingsScreen(
+                prefs = prefs,
+                appearance = appearance,
+                templateCount = templates.size,
+                categoryCount = state.categories.size,
                 onBack = nav::popBackStack,
                 onGo = nav::navigate,
                 onLoadDemo = { vm.loadDemoData(); nav.popBackStack() },
+                onExport = { exportAll.launch("money-manager-export.csv") },
+                onPinWidget = { confirm(requestPinWidget(context)) },
+                onDeleteEverything = {
+                    vm.deleteEverything { }
+                    confirm("Everything erased. Categories and a cash account are back.")
+                },
             )
         }
     }

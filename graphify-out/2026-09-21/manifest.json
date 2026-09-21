@@ -1,0 +1,332 @@
+{
+  ".impeccable/design.json": {
+    "mtime": 1789192260.6107478,
+    "ast_hash": "",
+    "semantic_hash": ""
+  },
+  "app/build.gradle.kts": {
+    "mtime": 1789815561.878578,
+    "ast_hash": "8da04bbab98b34e72311151afb9dd9e3",
+    "semantic_hash": "8da04bbab98b34e72311151afb9dd9e3"
+  },
+  "app/schemas/com.moneymanager.data.db.MoneyDatabase/1.json": {
+    "mtime": 1789200120.965267,
+    "ast_hash": "",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/MainActivity.kt": {
+    "mtime": 1789954457.5168285,
+    "ast_hash": "5fcadbb1ffd70ec6db517e05ca8496ba",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/MoneyApp.kt": {
+    "mtime": 1789956486.5687993,
+    "ast_hash": "311581f029fc8f3a8452a0f1d330b519",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/AppPrefs.kt": {
+    "mtime": 1789954430.7777057,
+    "ast_hash": "6cef10ed133d1cdb8f56e580a006e1c9",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/Challenges.kt": {
+    "mtime": 1789814124.5704541,
+    "ast_hash": "625ec062ea7396dd983c9ca01c206cdf",
+    "semantic_hash": "625ec062ea7396dd983c9ca01c206cdf"
+  },
+  "app/src/main/java/com/moneymanager/data/DemoData.kt": {
+    "mtime": 1789199881.0808415,
+    "ast_hash": "93652db7dca5d17be122e478819643a9",
+    "semantic_hash": "93652db7dca5d17be122e478819643a9"
+  },
+  "app/src/main/java/com/moneymanager/data/LedgerCsv.kt": {
+    "mtime": 1789455441.7608364,
+    "ast_hash": "c1a736003d34990956e4dd7c594aa3ab",
+    "semantic_hash": "c1a736003d34990956e4dd7c594aa3ab"
+  },
+  "app/src/main/java/com/moneymanager/data/Model.kt": {
+    "mtime": 1789956436.9482841,
+    "ast_hash": "97b10ffd1251932444e7eb689da08602",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/MoneyRepository.kt": {
+    "mtime": 1789956478.8124094,
+    "ast_hash": "67765a2d220463cfd1691774f62e96e2",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/Rates.kt": {
+    "mtime": 1789814185.4775205,
+    "ast_hash": "80e0cbef291d0c84c530914fa55516b3",
+    "semantic_hash": "80e0cbef291d0c84c530914fa55516b3"
+  },
+  "app/src/main/java/com/moneymanager/data/ReceiptParser.kt": {
+    "mtime": 1789453225.714296,
+    "ast_hash": "fcd3e3d6508c718c63205d0b39fcfffd",
+    "semantic_hash": "fcd3e3d6508c718c63205d0b39fcfffd"
+  },
+  "app/src/main/java/com/moneymanager/data/ReceiptScanner.kt": {
+    "mtime": 1789453307.9002185,
+    "ast_hash": "9422b27d17d28ec621d7b776a3ad4861",
+    "semantic_hash": "9422b27d17d28ec621d7b776a3ad4861"
+  },
+  "app/src/main/java/com/moneymanager/data/Reminders.kt": {
+    "mtime": 1789954905.658738,
+    "ast_hash": "967343e446378ee210867079528a4939",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/SecurityStore.kt": {
+    "mtime": 1789447765.629295,
+    "ast_hash": "fd657cda86ddc339060d054e6be9be2e",
+    "semantic_hash": "fd657cda86ddc339060d054e6be9be2e"
+  },
+  "app/src/main/java/com/moneymanager/data/StatementImport.kt": {
+    "mtime": 1789450305.8692832,
+    "ast_hash": "4a4452d36d150cd4152967ecc328ef56",
+    "semantic_hash": "4a4452d36d150cd4152967ecc328ef56"
+  },
+  "app/src/main/java/com/moneymanager/data/db/Daos.kt": {
+    "mtime": 1789956446.9879475,
+    "ast_hash": "ead24cdcee2ec7e6cdd6f0d97e2c742f",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/db/Entities.kt": {
+    "mtime": 1789956446.9869792,
+    "ast_hash": "4c7402e45d7179b8bbf484ceb7022cc9",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/db/MoneyDatabase.kt": {
+    "mtime": 1789956456.8661048,
+    "ast_hash": "c488a0b09b79561d1dea8770c1bdec99",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/Biometrics.kt": {
+    "mtime": 1789447777.0799434,
+    "ast_hash": "6e7dff67922c171c8fd24d2ed2db4d72",
+    "semantic_hash": "6e7dff67922c171c8fd24d2ed2db4d72"
+  },
+  "app/src/main/java/com/moneymanager/ui/Charts.kt": {
+    "mtime": 1789954470.3013988,
+    "ast_hash": "ad114f0886a93840c4c04076b2dc8dc2",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/Components.kt": {
+    "mtime": 1789814506.5011241,
+    "ast_hash": "d0aab3c246feef2f785f767ad52c0d32",
+    "semantic_hash": "d0aab3c246feef2f785f767ad52c0d32"
+  },
+  "app/src/main/java/com/moneymanager/ui/Icons.kt": {
+    "mtime": 1789954539.7350075,
+    "ast_hash": "9efb8153ca03ac881fb77acf311c7886",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/Nav.kt": {
+    "mtime": 1789956529.680756,
+    "ast_hash": "85f50aca7272b96b90f210a826c2fe8a",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/Theme.kt": {
+    "mtime": 1789954412.7960675,
+    "ast_hash": "8b0f97ae901c9a6bfd044fdd6f4ff08e",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/Water.kt": {
+    "mtime": 1789455840.9397695,
+    "ast_hash": "909c051e6dd19b7fa5973402e90b685b",
+    "semantic_hash": "909c051e6dd19b7fa5973402e90b685b"
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Budgets.kt": {
+    "mtime": 1789814984.2346084,
+    "ast_hash": "3267cb1e8ecd9ee30151d35d2b36c202",
+    "semantic_hash": "3267cb1e8ecd9ee30151d35d2b36c202"
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Common.kt": {
+    "mtime": 1789192557.481985,
+    "ast_hash": "48f67eb7230dec7d9de002bcd1cb04be",
+    "semantic_hash": "48f67eb7230dec7d9de002bcd1cb04be"
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Home.kt": {
+    "mtime": 1789814984.2346084,
+    "ast_hash": "1615676b79359b3bbda5bfdd24c11bc0",
+    "semantic_hash": "1615676b79359b3bbda5bfdd24c11bc0"
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Import.kt": {
+    "mtime": 1789957149.6843243,
+    "ast_hash": "7ca472d2b2ce56b0b5fec43448fcc19b",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Ledger.kt": {
+    "mtime": 1789957277.7502098,
+    "ast_hash": "fca9114b72f101eac6f7375913c2376e",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Money.kt": {
+    "mtime": 1789957159.6709523,
+    "ast_hash": "9a62d91489039b1661d17dec8b54f89a",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/More.kt": {
+    "mtime": 1789955146.6480422,
+    "ast_hash": "6a52aeff95d03fb32539a67c483c0b2a",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Reports.kt": {
+    "mtime": 1789957207.1480489,
+    "ast_hash": "9e97bc5a37fd34280b6bd7f1ab6e7f48",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Scan.kt": {
+    "mtime": 1789457685.799909,
+    "ast_hash": "d97f9189add285756f5956a8f7594df7",
+    "semantic_hash": "d97f9189add285756f5956a8f7594df7"
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/Sheets.kt": {
+    "mtime": 1789814506.5011241,
+    "ast_hash": "221c6b352a1f2751a5090bc136d7c34d",
+    "semantic_hash": "221c6b352a1f2751a5090bc136d7c34d"
+  },
+  "app/src/main/java/com/moneymanager/widget/MoneyWidget.kt": {
+    "mtime": 1789954646.0541265,
+    "ast_hash": "6e94d29cc0e0a554b9dfff0ba032ec4a",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/ChallengesTest.kt": {
+    "mtime": 1789812116.536102,
+    "ast_hash": "e7f3e0c2706c196abbe1e21c53f28999",
+    "semantic_hash": "e7f3e0c2706c196abbe1e21c53f28999"
+  },
+  "app/src/test/java/com/moneymanager/data/LedgerCsvTest.kt": {
+    "mtime": 1789455467.9852788,
+    "ast_hash": "8773cb8eebb95715a288780a91305838",
+    "semantic_hash": "8773cb8eebb95715a288780a91305838"
+  },
+  "app/src/test/java/com/moneymanager/data/LedgerStateTest.kt": {
+    "mtime": 1789956622.3181472,
+    "ast_hash": "40e66c2303086b048670b08df8f05159",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/NextDueTest.kt": {
+    "mtime": 1789812773.3747602,
+    "ast_hash": "99443bf7547f42cf60f334437f2fe508",
+    "semantic_hash": "99443bf7547f42cf60f334437f2fe508"
+  },
+  "app/src/test/java/com/moneymanager/data/RatesTest.kt": {
+    "mtime": 1789451561.2322755,
+    "ast_hash": "280778cd76070b8a18356a2fdc3a75fc",
+    "semantic_hash": "280778cd76070b8a18356a2fdc3a75fc"
+  },
+  "app/src/test/java/com/moneymanager/data/ReceiptParserTest.kt": {
+    "mtime": 1789453225.714296,
+    "ast_hash": "d9512be86d9c8b7febe3552fab6a655c",
+    "semantic_hash": "d9512be86d9c8b7febe3552fab6a655c"
+  },
+  "app/src/test/java/com/moneymanager/data/RepositoryWriteTest.kt": {
+    "mtime": 1789816155.326083,
+    "ast_hash": "5a95920c470d7fbbfde3f4b3b3f19853",
+    "semantic_hash": "5a95920c470d7fbbfde3f4b3b3f19853"
+  },
+  "app/src/test/java/com/moneymanager/data/StatementImportTest.kt": {
+    "mtime": 1789450317.7170546,
+    "ast_hash": "d2eb7e520b85bcb86f1f8d250d389fbc",
+    "semantic_hash": "d2eb7e520b85bcb86f1f8d250d389fbc"
+  },
+  "build.gradle.kts": {
+    "mtime": 1789199759.4866588,
+    "ast_hash": "f18c3f5819750d1800ff9c434f0b75bf",
+    "semantic_hash": "f18c3f5819750d1800ff9c434f0b75bf"
+  },
+  "gradlew": {
+    "mtime": 1789192099.9578774,
+    "ast_hash": "f092910dfa8e47c5a37a452c3f6baf8a",
+    "semantic_hash": "f092910dfa8e47c5a37a452c3f6baf8a"
+  },
+  "settings.gradle.kts": {
+    "mtime": 1789191345.5629878,
+    "ast_hash": "6e9e02d2be97ad4d8a8825df1a5ca418",
+    "semantic_hash": "6e9e02d2be97ad4d8a8825df1a5ca418"
+  },
+  ".impeccable/assets/provenance.md": {
+    "mtime": 1789194344.791849,
+    "ast_hash": "3106da5db3483f069ea44f69db75bdd2",
+    "semantic_hash": "3106da5db3483f069ea44f69db75bdd2"
+  },
+  "BUILD.md": {
+    "mtime": 1789957331.9081838,
+    "ast_hash": "0f6271b966d375fd04f7ad83f2e7e866",
+    "semantic_hash": ""
+  },
+  "DESIGN.md": {
+    "mtime": 1789455862.336627,
+    "ast_hash": "cbcc12d9c4d2d9c2e461366928c69437",
+    "semantic_hash": "cbcc12d9c4d2d9c2e461366928c69437"
+  },
+  "PRODUCT.md": {
+    "mtime": 1789815099.2236211,
+    "ast_hash": "35fb5a6f186aa9727f92ac1c3b0e19b0",
+    "semantic_hash": "35fb5a6f186aa9727f92ac1c3b0e19b0"
+  },
+  "README.md": {
+    "mtime": 1787595448.8902922,
+    "ast_hash": "7873c6010f75e9a366e843d6fc40e559",
+    "semantic_hash": "7873c6010f75e9a366e843d6fc40e559"
+  },
+  "app/src/main/res/drawable-nodpi/goal_bali.jpg": {
+    "mtime": 1789194303.0005505,
+    "ast_hash": "3fedc41c8ee6ea00c88f6c5c0d1a12e7",
+    "semantic_hash": "3fedc41c8ee6ea00c88f6c5c0d1a12e7"
+  },
+  "app/src/main/res/drawable-nodpi/goal_emergency.jpg": {
+    "mtime": 1789194302.131378,
+    "ast_hash": "f9df961b5746fd01d76c03ada20b92df",
+    "semantic_hash": "f9df961b5746fd01d76c03ada20b92df"
+  },
+  "app/src/main/res/drawable-nodpi/goal_laptop.jpg": {
+    "mtime": 1789194302.5981264,
+    "ast_hash": "e7c7fa9f307da50b8073ab2888a8b1c6",
+    "semantic_hash": "e7c7fa9f307da50b8073ab2888a8b1c6"
+  },
+  "app/src/main/java/com/moneymanager/ui/screens/SettingsDetail.kt": {
+    "mtime": 1789954940.216949,
+    "ast_hash": "bfe2daba4acbfd59a8ead819aa86cc31",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/PeriodsTest.kt": {
+    "mtime": 1789954784.0817666,
+    "ast_hash": "5d91c725902fb1c0e4a4b4a77f0eba8b",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/SettingsWriteTest.kt": {
+    "mtime": 1789954830.250943,
+    "ast_hash": "baa654834014f172d85e6c72bc37930d",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/AssetTest.kt": {
+    "mtime": 1789956614.1844268,
+    "ast_hash": "952e51a9fd7da3e4cc54f4a678309a8c",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/LedgerSearch.kt": {
+    "mtime": 1789957269.561867,
+    "ast_hash": "49b3c4fa93997f2c416645d3b7c25833",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/ReportPdf.kt": {
+    "mtime": 1789957187.81833,
+    "ast_hash": "d8b8a9836e40d4de2f7b80628c850835",
+    "semantic_hash": ""
+  },
+  "app/src/main/java/com/moneymanager/data/XlsxImport.kt": {
+    "mtime": 1789957046.583073,
+    "ast_hash": "96ce0b2e743cda5ce25be7eed561ce28",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/LedgerSearchTest.kt": {
+    "mtime": 1789957295.816973,
+    "ast_hash": "95501e68ccda3862c3e325cc7695d8b0",
+    "semantic_hash": ""
+  },
+  "app/src/test/java/com/moneymanager/data/XlsxImportTest.kt": {
+    "mtime": 1789957128.9737744,
+    "ast_hash": "3525779bdd229025f9c682592ede7984",
+    "semantic_hash": ""
+  }
+}
